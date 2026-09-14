@@ -1,0 +1,37 @@
+# Registry of brand B2B portals to scrape.
+#
+# Each entry:
+#   key:            short internal identifier, used in --brands filter and in CLI output
+#   name:           display name written to the "brand" column in the CSV
+#   portal_url:     login/landing URL for the brand's B2B site
+#   scraper:        dotted path to the scraper class handling this brand
+#   username_env:   name of the .env variable holding the login username/email
+#   password_env:   name of the .env variable holding the login password
+#   enabled:        set false to skip a brand without deleting its config
+#
+# To onboard a new brand: add an entry here, add its credentials to .env
+# (see .env.example), and add a scraper module under src/kinetik_stock/scrapers/
+# that implements BaseScraper (see scrapers/example_brand.py for a full example).
+
+brands:
+  # DEMO ENTRY: points at the local test fixture (tests/fixtures/example_b2b/),
+  # not a real B2B portal. It exists so `python run.py` produces real output
+  # out of the box, proving the login -> scrape -> CSV pipeline end-to-end.
+  # Once you add your first real brand below, set this one's enabled to false
+  # (or delete it).
+  - key: example_brand
+    name: "Example Brand"
+    portal_url: "tests/fixtures/example_b2b/login.html"
+    scraper: "kinetik_stock.scrapers.example_brand.ExampleBrandScraper"
+    username_env: "EXAMPLE_BRAND_USERNAME"
+    password_env: "EXAMPLE_BRAND_PASSWORD"
+    enabled: true
+
+  # Add real brands here, e.g.:
+  # - key: acme_bikes
+  #   name: "Acme Bikes"
+  #   portal_url: "https://dealers.acmebikes.com/login"
+  #   scraper: "kinetik_stock.scrapers.acme_bikes.AcmeBikesScraper"
+  #   username_env: "ACME_BIKES_USERNAME"
+  #   password_env: "ACME_BIKES_PASSWORD"
+  #   enabled: true

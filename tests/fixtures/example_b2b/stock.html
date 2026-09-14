@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Example Brand - Bike Availability</title></head>
+<body>
+  <div id="unauthorized" style="display:none;">Not authorized. Please log in.</div>
+  <div id="content" style="display:none;">
+    <h1>Bike Availability</h1>
+    <table id="stock-table">
+      <thead>
+        <tr><th>SKU</th><th>Model</th><th>Variant</th><th>Status</th><th>Qty</th></tr>
+      </thead>
+      <tbody>
+        <tr data-sku="EB-100-M">
+          <td class="sku">EB-100-M</td>
+          <td class="model">Trailblazer 100</td>
+          <td class="variant">Medium / Black</td>
+          <td class="status">In Stock</td>
+          <td class="qty">14</td>
+        </tr>
+        <tr data-sku="EB-100-L">
+          <td class="sku">EB-100-L</td>
+          <td class="model">Trailblazer 100</td>
+          <td class="variant">Large / Black</td>
+          <td class="status">Out of Stock</td>
+          <td class="qty">0</td>
+        </tr>
+        <tr data-sku="EB-200-M">
+          <td class="sku">EB-200-M</td>
+          <td class="model">Ridgeline 200</td>
+          <td class="variant">Medium / Blue</td>
+          <td class="status">ETA 2025-11-15</td>
+          <td class="qty">0</td>
+        </tr>
+        <tr data-sku="EB-050-S">
+          <td class="sku">EB-050-S</td>
+          <td class="model">Summit 50</td>
+          <td class="variant">Small / Red</td>
+          <td class="status">Discontinued</td>
+          <td class="qty">0</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("authed") === "1") {
+      document.getElementById("content").style.display = "block";
+    } else {
+      document.getElementById("unauthorized").style.display = "block";
+    }
+  </script>
+</body>
+</html>
