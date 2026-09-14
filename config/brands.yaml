@@ -35,3 +35,14 @@ brands:
   #   username_env: "ACME_BIKES_USERNAME"
   #   password_env: "ACME_BIKES_PASSWORD"
   #   enabled: true
+
+  # Disabled until the login form / stock page selectors in
+  # scrapers/transition_bikes.py are confirmed against the real portal
+  # (this sandbox can't reach b2b.transitionbikes.com to inspect it directly).
+  - key: transition_bikes
+    name: "Transition Bikes"
+    portal_url: "https://b2b.transitionbikes.com/Account"
+    scraper: "kinetik_stock.scrapers.transition_bikes.TransitionBikesScraper"
+    username_env: "TRANSITION_BIKES_USERNAME"
+    password_env: "TRANSITION_BIKES_PASSWORD"
+    enabled: false
