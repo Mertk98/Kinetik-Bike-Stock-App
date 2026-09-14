@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kinetik_stock.models import StockItem
+from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.base import BaseScraper
 
 # Confirmed against the real login page HTML (a ColdFusion-based site, not
@@ -12,29 +12,36 @@ PASSWORD_SELECTOR = "input[name='Password']"
 # The only <button> on the page - the footer form uses <input type="submit">.
 LOGIN_BUTTON_SELECTOR = "button[type='submit']"
 
-# TODO: unconfirmed - we don't yet know what a successful login looks like
-# (redirect URL, or does /Account just re-render logged in?) or what an
-# invalid-credentials error looks like. This checks for the login form
-# disappearing as a proxy for "logged in". Run with
-# `python run.py --brands transition_bikes --no-headless -v` and watch what
-# actually happens on both success and failure, then tighten this check
-# (e.g. to a specific dashboard element or exact error text).
+# Confirmed against the real post-login account page (Account_Home.cfm):
+# a successful login lands somewhere with an /Account/Logout link in the nav.
+LOGGED_IN_SELECTOR = "a[href='/Account/Logout']"
 LOGGED_IN_CHECK_TIMEOUT_MS = 10000
 
-# TODO: unknown - need the HTML of the dealer's stock/inventory/ETA page
-# (wherever it lives post-login) to implement this.
-STOCK_PAGE_URL = "https://b2b.transitionbikes.com/Account"
-STOCK_ROW_SELECTOR = "table tbody tr"
+# Confirmed: the account page has a "STOCK LIST" section
+# (refLocation="StockList" refURL="/Account_StockList.cfm") that AJAX-loads
+# this URL's HTML into the page. Navigating there directly re-uses the same
+# authenticated session/cookies.
+STOCK_PAGE_URL = "https://b2b.transitionbikes.com/Account_StockList.cfm"
 
 
 class TransitionBikesScraper(BaseScraper):
     """Scraper for Transition Bikes' B2B dealer portal
     (https://b2b.transitionbikes.com/Account).
 
-    login() is wired up against the real login form. fetch_stock() is still
-    a placeholder - we need the post-login stock/availability page's HTML to
-    finish it. Disabled in config/brands.yaml until fetch_stock() is done and
-    login() is confirmed against real credentials.
+    login() is wired up and confirmed against the real login form + a real
+    post-login account page.
+
+    fetch_stock() is a CALIBRATION pass, not final parsing: we know the stock
+    data lives at Account_StockList.cfm, but not its table's column layout
+    or status wording yet. It currently dumps every table row's raw cell
+    text as one StockItem per row (status=UNKNOWN). Run this with
+    `python run.py --brands transition_bikes --no-headless -v` and send back
+    the resulting CSV so fetch_stock() can be rewritten to map real columns
+    (SKU, model, size/color, status, ETA, qty) into proper StockItems with
+    correct StockStatus values.
+
+    Disabled in config/brands.yaml until that final parsing is done - test it
+    explicitly with `--brands transition_bikes` in the meantime.
     """
 
     def login(self) -> None:
@@ -46,26 +53,37 @@ class TransitionBikesScraper(BaseScraper):
 
         try:
             self.page.wait_for_selector(
-                USERNAME_SELECTOR, state="detached", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
+                LOGGED_IN_SELECTOR, state="visible", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
             )
         except Exception:
             raise RuntimeError(
-                f"Login to {self.brand_config.name} failed (login form still present) - "
-                f"check {self.brand_config.username_env}/{self.brand_config.password_env}, "
-                "or the success/failure detection needs updating for this portal."
+                f"Login to {self.brand_config.name} failed (no logout link found) - "
+                f"check {self.brand_config.username_env}/{self.brand_config.password_env}."
             )
 
     def fetch_stock(self) -> list[StockItem]:
         self.page.goto(STOCK_PAGE_URL)
-        rows = self.page.query_selector_all(STOCK_ROW_SELECTOR)
+        source_url = self.page.url
 
         items: list[StockItem] = []
-        for row in rows:
-            # TODO: replace with real column selectors/parsing once we've
-            # seen the actual stock page markup.
-            raise NotImplementedError(
-                "TransitionBikesScraper.fetch_stock() has placeholder "
-                "selectors only - need the real stock/inventory page HTML."
-            )
+        for table_index, table in enumerate(self.page.query_selector_all("table")):
+            for row_index, row in enumerate(table.query_selector_all("tr")):
+                cell_texts = [
+                    cell.inner_text().strip() for cell in row.query_selector_all("td")
+                ]
+                cell_texts = [text for text in cell_texts if text]
+                if not cell_texts:
+                    continue
+
+                items.append(
+                    StockItem(
+                        brand=self.brand_config.name,
+                        sku=f"table{table_index}-row{row_index}",
+                        product_title=" | ".join(cell_texts),
+                        status=StockStatus.UNKNOWN,
+                        raw_status_text=" | ".join(cell_texts),
+                        source_url=source_url,
+                    )
+                )
 
         return items

@@ -15,11 +15,14 @@ logger = logging.getLogger(__name__)
 def select_brands(
     brands: list[BrandConfig], only_keys: list[str] | None
 ) -> list[BrandConfig]:
-    selected = [b for b in brands if b.enabled]
+    # Explicitly requesting a brand by key (--brands foo) is deliberate intent
+    # and overrides `enabled: false` - useful for testing a brand that isn't
+    # ready for full/bulk runs yet. A bare run (no --brands) only picks up
+    # enabled brands.
     if only_keys:
         wanted = set(only_keys)
-        selected = [b for b in selected if b.key in wanted]
-    return selected
+        return [b for b in brands if b.key in wanted]
+    return [b for b in brands if b.enabled]
 
 
 def run_brand(brand: BrandConfig, browser, *, headless: bool) -> list[StockItem]:
