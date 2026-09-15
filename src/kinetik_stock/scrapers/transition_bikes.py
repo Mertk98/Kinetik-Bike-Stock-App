@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from typing import Optional
+
 from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.base import BaseScraper
 
@@ -23,25 +26,67 @@ LOGGED_IN_CHECK_TIMEOUT_MS = 10000
 # authenticated session/cookies.
 STOCK_PAGE_URL = "https://b2b.transitionbikes.com/Account_StockList.cfm"
 
+# The stock list also includes Accessories, Components, Parts, Frames, etc.
+# Only bikes matter for Timesact/storefront availability, so filter to this
+# category by default. Add more (e.g. "framesets") if that changes.
+INCLUDE_CATEGORIES = {"complete bikes"}
+
+# Each row's <td> cells get joined with " | ". Column count varies row to
+# row because blank price cells (no sale price, no customer price, etc.) are
+# dropped rather than left as empty segments - so we anchor on the first 4
+# fields (Category, Vendor, Product, Part Number) and the last field
+# (Availability), which are always present in that position, rather than a
+# fixed total column count.
+MIN_FIELDS = 5  # category, vendor, product, part number, availability
+
+VARIANT_RE = re.compile(r"^(?P<before>.*?)\s*\((?P<variant>[^)]*)\)\s*(?P<after>.*)$")
+LOW_STOCK_RE = re.compile(r"low stock\s*\((\d+)\)", re.IGNORECASE)
+
+
+def split_product_and_variant(product_field: str) -> tuple[str, Optional[str]]:
+    """'Complete: Bandit Hardtail (One Size, Black and Green)' ->
+    ('Complete: Bandit Hardtail', 'One Size, Black and Green'). Handles a
+    trailing suffix after the parens too, e.g. '... (X-Large, White) - USA'.
+    """
+    match = VARIANT_RE.match(product_field.strip())
+    if not match:
+        return product_field.strip(), None
+
+    before = match.group("before").strip()
+    after = match.group("after").strip()
+    variant = match.group("variant").strip()
+    title = f"{before} {after}".strip() if after else before
+    return title, variant
+
+
+def normalize_status(raw_text: str) -> tuple[StockStatus, Optional[int]]:
+    text = raw_text.strip()
+    lowered = text.lower()
+
+    low_stock_match = LOW_STOCK_RE.search(lowered)
+    if low_stock_match:
+        return StockStatus.IN_STOCK, int(low_stock_match.group(1))
+    if lowered == "in stock":
+        return StockStatus.IN_STOCK, None
+    if lowered == "out of stock":
+        return StockStatus.OUT_OF_STOCK, None
+    if lowered == "pre-order":
+        # No specific date given by this portal - just a future-availability
+        # flag, which is what ETA means for our purposes.
+        return StockStatus.ETA, None
+    # No "Discontinued" example seen yet - if one turns up with different
+    # wording, add it here.
+    return StockStatus.UNKNOWN, None
+
 
 class TransitionBikesScraper(BaseScraper):
     """Scraper for Transition Bikes' B2B dealer portal
     (https://b2b.transitionbikes.com/Account).
 
-    login() is wired up and confirmed against the real login form + a real
-    post-login account page.
-
-    fetch_stock() is a CALIBRATION pass, not final parsing: we know the stock
-    data lives at Account_StockList.cfm, but not its table's column layout
-    or status wording yet. It currently dumps every table row's raw cell
-    text as one StockItem per row (status=UNKNOWN). Run this with
-    `python run.py --brands transition_bikes --no-headless -v` and send back
-    the resulting CSV so fetch_stock() can be rewritten to map real columns
-    (SKU, model, size/color, status, ETA, qty) into proper StockItems with
-    correct StockStatus values.
-
-    Disabled in config/brands.yaml until that final parsing is done - test it
-    explicitly with `--brands transition_bikes` in the meantime.
+    Both login() and fetch_stock() are wired up against real portal HTML/data.
+    Still not enabled by default in config/brands.yaml pending a live
+    re-run to confirm this parsing against the real page (it was written
+    from a sample CSV dump, not by directly inspecting the live table).
     """
 
     def login(self) -> None:
@@ -66,22 +111,36 @@ class TransitionBikesScraper(BaseScraper):
         source_url = self.page.url
 
         items: list[StockItem] = []
-        for table_index, table in enumerate(self.page.query_selector_all("table")):
-            for row_index, row in enumerate(table.query_selector_all("tr")):
+        for table in self.page.query_selector_all("table"):
+            for row in table.query_selector_all("tr"):
                 cell_texts = [
                     cell.inner_text().strip() for cell in row.query_selector_all("td")
                 ]
                 cell_texts = [text for text in cell_texts if text]
-                if not cell_texts:
+
+                if len(cell_texts) < MIN_FIELDS:
                     continue
+                if cell_texts[1].strip().upper() == "VENDOR":
+                    continue  # header row
+
+                category, _vendor, product_field, part_number = cell_texts[:4]
+                raw_status = cell_texts[-1]
+
+                if category.strip().lower() not in INCLUDE_CATEGORIES:
+                    continue
+
+                product_title, variant = split_product_and_variant(product_field)
+                status, quantity = normalize_status(raw_status)
 
                 items.append(
                     StockItem(
                         brand=self.brand_config.name,
-                        sku=f"table{table_index}-row{row_index}",
-                        product_title=" | ".join(cell_texts),
-                        status=StockStatus.UNKNOWN,
-                        raw_status_text=" | ".join(cell_texts),
+                        sku=part_number,
+                        product_title=product_title,
+                        variant=variant,
+                        status=status,
+                        quantity=quantity,
+                        raw_status_text=raw_status,
                         source_url=source_url,
                     )
                 )
