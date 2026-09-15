@@ -40,22 +40,21 @@ Output CSVs are written to `output/` by default, timestamped
 
 ## CSV schema
 
+Kept deliberately lean - across hundreds of SKUs, extra columns add up fast:
+
 | column           | meaning                                                        |
 |------------------|------------------------------------------------------------------|
 | brand            | display name from `config/brands.yaml`                          |
-| sku              | brand's SKU / part number, for matching to your Shopify variant  |
-| product_title    | model name as shown on the B2B portal                            |
-| variant          | size/color/spec, if the portal breaks it out separately          |
-| status           | one of `in_stock`, `out_of_stock`, `eta`, `discontinued`, `unknown` |
-| quantity         | numeric quantity if the portal exposes one, else blank           |
-| eta_date         | `YYYY-MM-DD` if status is `eta` and a date was found, else blank |
-| raw_status_text  | the untouched text scraped from the portal (for debugging)       |
-| source_url       | page the row was scraped from                                    |
-| scraped_at       | UTC timestamp of the scrape                                       |
+| sku              | brand's part number, for matching to your Shopify variant       |
+| product_title    | model name (and variant, e.g. size/color, if the portal breaks it out) |
+| regular_retail   | list price, if the portal exposes one, else blank                |
+| availability     | one of `in_stock`, `out_of_stock`, `eta`, `discontinued`, `unknown` |
 
-This schema isn't final — once you've seen a real run's output next to what
-Timesact Pre-Order expects for import, tell me what to rename/add/drop and
-I'll adjust `models.py` and `csv_export.py` accordingly.
+More detail (exact quantity for low-stock items, variant split out
+separately, raw untouched portal text, source URL, scrape timestamp) is
+still captured on each `StockItem` in code, just not written to the CSV.
+Tell me if you want any of that back as a column, or want fewer/different
+ones once you've seen how Timesact Pre-Order's import expects the data.
 
 ## Included demo brand
 

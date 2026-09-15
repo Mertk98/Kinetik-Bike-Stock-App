@@ -23,6 +23,7 @@ class StockItem:
     product_title: str
     status: StockStatus
     quantity: Optional[int] = None
+    regular_retail_price: Optional[float] = None
     eta_date: Optional[str] = None
     variant: Optional[str] = None
     raw_status_text: str = ""
@@ -32,17 +33,19 @@ class StockItem:
     )
 
     def as_csv_row(self) -> dict:
+        # Kept deliberately lean (product name, part number, price,
+        # availability) - the fuller detail above (variant, quantity,
+        # raw portal text, timestamps) stays on the object for internal use
+        # but isn't written to the CSV, which otherwise gets noisy fast
+        # across hundreds of SKUs.
         return {
             "brand": self.brand,
             "sku": self.sku,
             "product_title": self.product_title,
-            "variant": self.variant or "",
-            "status": self.status.value,
-            "quantity": "" if self.quantity is None else self.quantity,
-            "eta_date": self.eta_date or "",
-            "raw_status_text": self.raw_status_text,
-            "source_url": self.source_url,
-            "scraped_at": self.scraped_at,
+            "regular_retail": (
+                "" if self.regular_retail_price is None else self.regular_retail_price
+            ),
+            "availability": self.status.value,
         }
 
 
@@ -50,11 +53,6 @@ CSV_FIELDNAMES = [
     "brand",
     "sku",
     "product_title",
-    "variant",
-    "status",
-    "quantity",
-    "eta_date",
-    "raw_status_text",
-    "source_url",
-    "scraped_at",
+    "regular_retail",
+    "availability",
 ]

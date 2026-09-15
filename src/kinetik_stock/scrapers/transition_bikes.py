@@ -41,6 +41,20 @@ MIN_FIELDS = 5  # category, vendor, product, part number, availability
 
 VARIANT_RE = re.compile(r"^(?P<before>.*?)\s*\((?P<variant>[^)]*)\)\s*(?P<after>.*)$")
 LOW_STOCK_RE = re.compile(r"low stock\s*\((\d+)\)", re.IGNORECASE)
+PRICE_RE = re.compile(r"^\$([\d,]+\.\d{2})$")
+
+
+def parse_regular_retail_price(fields: list[str]) -> Optional[float]:
+    """Regular Retail is always the first dollar-amount field after Part
+    Number in the row's field order (UPC12/EAN13 are plain numbers with no
+    '$', and any of Sale Retail / Regular or Sale Customer Price can be
+    missing) - so take the first '$...' field rather than a fixed index.
+    """
+    for text in fields:
+        match = PRICE_RE.match(text.strip())
+        if match:
+            return float(match.group(1).replace(",", ""))
+    return None
 
 
 def split_product_and_variant(product_field: str) -> tuple[str, Optional[str]]:
@@ -131,6 +145,7 @@ class TransitionBikesScraper(BaseScraper):
 
                 product_title, variant = split_product_and_variant(product_field)
                 status, quantity = normalize_status(raw_status)
+                regular_retail_price = parse_regular_retail_price(cell_texts[4:-1])
 
                 items.append(
                     StockItem(
@@ -140,6 +155,7 @@ class TransitionBikesScraper(BaseScraper):
                         variant=variant,
                         status=status,
                         quantity=quantity,
+                        regular_retail_price=regular_retail_price,
                         raw_status_text=raw_status,
                         source_url=source_url,
                     )
