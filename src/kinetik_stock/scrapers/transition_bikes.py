@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Optional
 
 from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.base import BaseScraper
+
+logger = logging.getLogger(__name__)
 
 # Confirmed against the real login page HTML (a ColdFusion-based site, not
 # ASP.NET as first guessed). The page has two <form>s with duplicate
@@ -107,6 +110,62 @@ def split_size_color(variant: Optional[str]) -> tuple[Optional[str], Optional[st
     return size.strip(), color.strip()
 
 
+# Model names that are two words - everything else is assumed to be the
+# single first word of the (Complete:-stripped) product title. Confirmed
+# against the storefront nav: transitionbikes.com/Bikes/<name with the
+# space removed>, e.g. "Repeater PT" -> /Bikes/RepeaterPT.
+TWO_WORD_BIKE_NAMES = ["PBJ 24", "Regulator CX", "Regulator SX", "Repeater PT"]
+
+PRODUCT_PAGE_BASE_URL = "https://www.transitionbikes.com/Bikes"
+
+
+def parse_bike_name_and_build_kit(product_title: str) -> tuple[str, Optional[str]]:
+    """'Complete: Repeater PT Carbon AXS' -> ('Repeater PT', 'Carbon AXS').
+    'Complete: Regulator CX Deore - USA' -> ('Regulator CX', 'Deore') - a
+    region suffix after ' - ' is dropped since it's not part of the build kit.
+    """
+    text = product_title.strip()
+    if text.lower().startswith("complete:"):
+        text = text[len("complete:") :].strip()
+    text = text.split(" - ", 1)[0].strip()
+
+    for name in TWO_WORD_BIKE_NAMES:
+        if text == name or text.startswith(name + " "):
+            build_kit = text[len(name) :].strip()
+            return name, build_kit or None
+
+    parts = text.split(" ", 1)
+    bike_name = parts[0]
+    build_kit = parts[1].strip() if len(parts) > 1 else None
+    return bike_name, build_kit
+
+
+def product_page_url(bike_name: str) -> str:
+    return f"{PRODUCT_PAGE_BASE_URL}/{bike_name.replace(' ', '')}"
+
+
+def fetch_eta_date(page, product_url: str, build_kit: str, color: str, size: str) -> Optional[str]:
+    """Visit the bike's public product page and read the ETA shown after
+    selecting the given build kit, color, and size.
+
+    NOT YET IMPLEMENTED - we don't have the real product page HTML yet, so
+    we don't know: what the build kit / color / size selectors look like
+    (dropdowns, swatches, buttons), whether picking one triggers a page
+    reload or just a JS-driven DOM update, or the exact markup the ETA text
+    appears in ("under the price"). Returns None (-> "N/A" in the CSV) for
+    now rather than guessing selectors against the live site.
+    """
+    logger.debug(
+        "ETA lookup not yet implemented for %s (%s / %s / %s) - %s",
+        product_url,
+        build_kit,
+        color,
+        size,
+        "leaving eta_date as N/A",
+    )
+    return None
+
+
 class TransitionBikesScraper(BaseScraper):
     """Scraper for Transition Bikes' B2B dealer portal
     (https://b2b.transitionbikes.com/Account).
@@ -162,19 +221,31 @@ class TransitionBikesScraper(BaseScraper):
                 status = normalize_status(raw_status)
                 regular_retail_price = parse_regular_retail_price(cell_texts[4:-1])
 
-                items.append(
-                    StockItem(
-                        brand=self.brand_config.name,
-                        sku=part_number,
-                        product_title=product_title,
-                        variant=variant,
-                        size=size,
-                        color=color,
-                        status=status,
-                        regular_retail_price=regular_retail_price,
-                        raw_status_text=raw_status,
-                        source_url=source_url,
-                    )
+                item = StockItem(
+                    brand=self.brand_config.name,
+                    sku=part_number,
+                    product_title=product_title,
+                    variant=variant,
+                    size=size,
+                    color=color,
+                    status=status,
+                    regular_retail_price=regular_retail_price,
+                    raw_status_text=raw_status,
+                    source_url=source_url,
                 )
+
+                # Only pre-order/ETA bikes have a date to find, and it's an
+                # extra page visit per SKU, so skip everything else.
+                if status == StockStatus.ETA and size and color:
+                    bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
+                    item.eta_date = fetch_eta_date(
+                        self.page,
+                        product_page_url(bike_name),
+                        build_kit or "",
+                        color,
+                        size,
+                    )
+
+                items.append(item)
 
         return items

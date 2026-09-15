@@ -51,6 +51,7 @@ class StockItem:
                 "" if self.regular_retail_price is None else self.regular_retail_price
             ),
             "availability": self.status.value,
+            "eta_date": self.eta_date or "N/A",
         }
 
 
@@ -62,4 +63,5 @@ CSV_FIELDNAMES = [
     "color",
     "regular_retail",
     "availability",
+    "eta_date",
 ]

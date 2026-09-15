@@ -53,6 +53,7 @@ Kept deliberately lean - across hundreds of SKUs, extra columns add up fast:
 | color            | e.g. "Moonstone" - blank if not applicable                       |
 | regular_retail   | list price, if the portal exposes one, else blank                |
 | availability     | one of `in_stock`, `low_stock`, `out_of_stock`, `eta`, `discontinued`, `unknown` |
+| eta_date         | date shown on the bike's public product page, only looked up for `eta` rows - `N/A` otherwise (in-stock/out-of-stock/etc. bikes don't have one) |
 
 More detail (exact quantity for low-stock items, variant split out
 separately, raw untouched portal text, source URL, scrape timestamp) is
