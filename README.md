@@ -35,8 +35,10 @@ python run.py --output output/stock.csv
 python run.py -v                       # verbose/debug logging
 ```
 
-Output CSVs are written to `output/` by default, timestamped
-(`stock_20260914T120000Z.csv`), one row per SKU/variant.
+Output CSVs are written to `output/` by default, one per brand selection
+(e.g. `stock_transition_bikes.csv`, `stock_all.csv` for a full run) -
+overwritten on each run rather than piling up. Pass `--output` for a
+different/one-off path.
 
 ## CSV schema
 

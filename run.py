@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
@@ -34,7 +33,10 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Output CSV path (default: output/stock_<timestamp>.csv)",
+        help=(
+            "Output CSV path (default: output/stock_<brand keys>.csv, "
+            "e.g. output/stock_transition_bikes.csv - overwritten on each run)"
+        ),
     )
     parser.add_argument(
         "--no-headless",
@@ -56,8 +58,8 @@ def main() -> int:
 
     output_path = args.output
     if output_path is None:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        output_path = Path("output") / f"stock_{timestamp}.csv"
+        brands_label = "_".join(sorted(args.brands)) if args.brands else "all"
+        output_path = Path("output") / f"stock_{brands_label}.csv"
 
     items, errors = run_all(only_keys=args.brands, headless=not args.no_headless)
 
