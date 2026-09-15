@@ -144,37 +144,46 @@ def product_page_url(bike_name: str) -> str:
     return f"{PRODUCT_PAGE_BASE_URL}/{bike_name.replace(' ', '')}"
 
 
-def fetch_eta_date(page, product_url: str, build_kit: str, color: str, size: str) -> Optional[str]:
-    """Visit the bike's public product page and read the ETA shown after
-    selecting the given build kit, color, and size.
+# Confirmed against the real Repeater PT product page: each size/color combo
+# is a ".ProductSelectorBox" div carrying the data directly as attributes -
+# refNameText (size, e.g. "Small "), a class matching the color's hex code
+# (e.g. "c2a87d"), and refMessage with the exact status: "Ships Now",
+# "OUT OF STOCK", or "SHIPS APPX: 9/25/26" (the ETA). No clicking needed to
+# read this - it's already in the static HTML for every combo, not just the
+# selected one. (HTML has a duplicate refMessage attribute on some boxes;
+# per spec, browsers keep the first occurrence, which is the real one.)
+SHIPS_APPX_RE = re.compile(r"ships appx:?\s*(\d{1,2})/(\d{1,2})/(\d{2,4})", re.IGNORECASE)
 
-    NOT YET IMPLEMENTED - we don't have the real product page HTML yet, so
-    we don't know: what the build kit / color / size selectors look like
-    (dropdowns, swatches, buttons), whether picking one triggers a page
-    reload or just a JS-driven DOM update, or the exact markup the ETA text
-    appears in ("under the price"). Returns None (-> "N/A" in the CSV) for
-    now rather than guessing selectors against the live site.
-    """
-    logger.debug(
-        "ETA lookup not yet implemented for %s (%s / %s / %s) - %s",
-        product_url,
-        build_kit,
-        color,
-        size,
-        "leaving eta_date as N/A",
-    )
-    return None
+
+def parse_eta_message(message: str) -> Optional[str]:
+    match = SHIPS_APPX_RE.search(message)
+    if not match:
+        return None
+    month, day, year = match.groups()
+    year_int = int(year)
+    if year_int < 100:
+        year_int += 2000
+    return f"{year_int:04d}-{int(month):02d}-{int(day):02d}"
 
 
 class TransitionBikesScraper(BaseScraper):
     """Scraper for Transition Bikes' B2B dealer portal
     (https://b2b.transitionbikes.com/Account).
 
-    Both login() and fetch_stock() are wired up against real portal HTML/data.
-    Still not enabled by default in config/brands.yaml pending a live
-    re-run to confirm this parsing against the real page (it was written
-    from a sample CSV dump, not by directly inspecting the live table).
+    login() and fetch_stock() are wired up and confirmed against real
+    portal HTML/data. ETA lookup (_fetch_eta_date) is confirmed against one
+    real product page (Repeater PT, single build kit) - the multi-build-kit
+    path (clicking a different build before reading colors/sizes) is
+    unverified since we haven't seen an example with more than one build
+    kit on the page.
     """
+
+    def __init__(self, brand_config, browser, *, headless: bool = True):
+        super().__init__(brand_config, browser, headless=headless)
+        # Avoids re-navigating to the same product page / re-clicking the
+        # same build kit for consecutive ETA rows of the same bike+build.
+        self._eta_page_url: Optional[str] = None
+        self._eta_build_kit: Optional[str] = None
 
     def login(self) -> None:
         self.page.goto(self.brand_config.portal_url)
@@ -197,7 +206,10 @@ class TransitionBikesScraper(BaseScraper):
         self.page.goto(STOCK_PAGE_URL)
         source_url = self.page.url
 
-        items: list[StockItem] = []
+        # Materialize every row's cell text up front. ETA lookups below
+        # navigate self.page away to a different site entirely, which would
+        # invalidate any live element handles still held from this page.
+        raw_rows: list[list[str]] = []
         for table in self.page.query_selector_all("table"):
             for row in table.query_selector_all("tr"):
                 cell_texts = [
@@ -210,42 +222,104 @@ class TransitionBikesScraper(BaseScraper):
                 if cell_texts[1].strip().upper() == "VENDOR":
                     continue  # header row
 
-                category, _vendor, product_field, part_number = cell_texts[:4]
-                raw_status = cell_texts[-1]
+                raw_rows.append(cell_texts)
 
-                if category.strip().lower() not in INCLUDE_CATEGORIES:
-                    continue
+        items: list[StockItem] = []
+        for cell_texts in raw_rows:
+            category, _vendor, product_field, part_number = cell_texts[:4]
+            raw_status = cell_texts[-1]
 
-                product_title, variant = split_product_and_variant(product_field)
-                size, color = split_size_color(variant)
-                status = normalize_status(raw_status)
-                regular_retail_price = parse_regular_retail_price(cell_texts[4:-1])
+            if category.strip().lower() not in INCLUDE_CATEGORIES:
+                continue
 
-                item = StockItem(
-                    brand=self.brand_config.name,
-                    sku=part_number,
-                    product_title=product_title,
-                    variant=variant,
-                    size=size,
-                    color=color,
-                    status=status,
-                    regular_retail_price=regular_retail_price,
-                    raw_status_text=raw_status,
-                    source_url=source_url,
+            product_title, variant = split_product_and_variant(product_field)
+            size, color = split_size_color(variant)
+            status = normalize_status(raw_status)
+            regular_retail_price = parse_regular_retail_price(cell_texts[4:-1])
+
+            item = StockItem(
+                brand=self.brand_config.name,
+                sku=part_number,
+                product_title=product_title,
+                variant=variant,
+                size=size,
+                color=color,
+                status=status,
+                regular_retail_price=regular_retail_price,
+                raw_status_text=raw_status,
+                source_url=source_url,
+            )
+
+            # Only pre-order/ETA bikes have a date to find, and it's an
+            # extra page visit per SKU, so skip everything else.
+            if status == StockStatus.ETA and size and color:
+                bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
+                item.eta_date = self._fetch_eta_date(
+                    product_page_url(bike_name), build_kit or "", color, size
                 )
 
-                # Only pre-order/ETA bikes have a date to find, and it's an
-                # extra page visit per SKU, so skip everything else.
-                if status == StockStatus.ETA and size and color:
-                    bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
-                    item.eta_date = fetch_eta_date(
-                        self.page,
-                        product_page_url(bike_name),
-                        build_kit or "",
-                        color,
-                        size,
-                    )
-
-                items.append(item)
+            items.append(item)
 
         return items
+
+    def _fetch_eta_date(
+        self, product_url: str, build_kit: str, color: str, size: str
+    ) -> Optional[str]:
+        if self._eta_page_url != product_url:
+            self.page.goto(product_url)
+            self._eta_page_url = product_url
+            self._eta_build_kit = None  # fresh page load, no build selected yet
+
+        if self._eta_build_kit != build_kit:
+            build_options = self.page.query_selector_all(".selectProductBike")
+            if len(build_options) > 1:
+                # UNVERIFIED: only tested against a single-build-kit page.
+                # Matches by substring since the storefront's build label
+                # (e.g. "Repeater PT AXS") doesn't necessarily match the
+                # B2B portal's build kit wording (e.g. "Carbon AXS") exactly.
+                build_kit_lower = build_kit.lower()
+                target = None
+                for option in build_options:
+                    label_el = option.query_selector(".theItemName")
+                    label = (label_el.inner_text() if label_el else "").strip().lower()
+                    if label and (label in build_kit_lower or build_kit_lower in label):
+                        target = option
+                        break
+                if target is not None:
+                    target.click()
+                    self.page.wait_for_load_state("networkidle")
+                else:
+                    logger.debug(
+                        "No build kit option matched %r on %s", build_kit, product_url
+                    )
+            self._eta_build_kit = build_kit
+
+        color_lower = color.strip().lower()
+        color_code = None
+        for swatch in self.page.query_selector_all(".BikeColor"):
+            if (swatch.get_attribute("refColor") or "").strip().lower() == color_lower:
+                color_code = swatch.get_attribute("refColorCode")
+                break
+
+        if color_code is None:
+            logger.debug("No color swatch matched %r on %s", color, product_url)
+            return None
+
+        size_lower = size.strip().lower()
+        size_first_word = size_lower.split()[0] if size_lower else ""
+
+        for box in self.page.query_selector_all(".ProductSelectorBox"):
+            box_classes = (box.get_attribute("class") or "").split()
+            if color_code not in box_classes:
+                continue
+            name_text = (box.get_attribute("refNameText") or "").strip().lower()
+            # Exact match first; fall back to the leading word only, since
+            # the B2B portal sometimes appends a wheel-size qualifier (e.g.
+            # "Large MX") that the storefront's plain size label may not.
+            if name_text != size_lower and name_text.split()[:1] != [size_first_word]:
+                continue
+            message = box.get_attribute("refMessage") or ""
+            return parse_eta_message(message)
+
+        logger.debug("No matching size/color box for %s/%s on %s", size, color, product_url)
+        return None
