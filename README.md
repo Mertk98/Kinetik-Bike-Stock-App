@@ -48,9 +48,11 @@ Kept deliberately lean - across hundreds of SKUs, extra columns add up fast:
 |------------------|------------------------------------------------------------------|
 | brand            | display name from `config/brands.yaml`                          |
 | sku              | brand's part number, for matching to your Shopify variant       |
-| product_title    | model name (and variant, e.g. size/color, if the portal breaks it out) |
+| product_title    | model name, with size/color stripped out into their own columns |
+| size             | e.g. "Large", "X-Large MX", "One Size" - blank if not applicable |
+| color            | e.g. "Moonstone" - blank if not applicable                       |
 | regular_retail   | list price, if the portal exposes one, else blank                |
-| availability     | one of `in_stock`, `out_of_stock`, `eta`, `discontinued`, `unknown` |
+| availability     | one of `in_stock`, `low_stock`, `out_of_stock`, `eta`, `discontinued`, `unknown` |
 
 More detail (exact quantity for low-stock items, variant split out
 separately, raw untouched portal text, source URL, scrape timestamp) is

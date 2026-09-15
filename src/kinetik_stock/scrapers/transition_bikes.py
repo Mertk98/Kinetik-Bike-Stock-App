@@ -40,7 +40,6 @@ INCLUDE_CATEGORIES = {"complete bikes"}
 MIN_FIELDS = 5  # category, vendor, product, part number, availability
 
 VARIANT_RE = re.compile(r"^(?P<before>.*?)\s*\((?P<variant>[^)]*)\)\s*(?P<after>.*)$")
-LOW_STOCK_RE = re.compile(r"low stock\s*\((\d+)\)", re.IGNORECASE)
 PRICE_RE = re.compile(r"^\$([\d,]+\.\d{2})$")
 
 
@@ -73,24 +72,39 @@ def split_product_and_variant(product_field: str) -> tuple[str, Optional[str]]:
     return title, variant
 
 
-def normalize_status(raw_text: str) -> tuple[StockStatus, Optional[int]]:
-    text = raw_text.strip()
-    lowered = text.lower()
+def normalize_status(raw_text: str) -> StockStatus:
+    # Exact stock counts aren't available for every SKU (only "Low Stock (N)"
+    # gives one, plain "In Stock" doesn't) so counts aren't used - just the
+    # four buckets the portal's availability text actually distinguishes.
+    lowered = raw_text.strip().lower()
 
-    low_stock_match = LOW_STOCK_RE.search(lowered)
-    if low_stock_match:
-        return StockStatus.IN_STOCK, int(low_stock_match.group(1))
+    if "low stock" in lowered:
+        return StockStatus.LOW_STOCK
     if lowered == "in stock":
-        return StockStatus.IN_STOCK, None
+        return StockStatus.IN_STOCK
     if lowered == "out of stock":
-        return StockStatus.OUT_OF_STOCK, None
+        return StockStatus.OUT_OF_STOCK
     if lowered == "pre-order":
         # No specific date given by this portal - just a future-availability
         # flag, which is what ETA means for our purposes.
-        return StockStatus.ETA, None
+        return StockStatus.ETA
     # No "Discontinued" example seen yet - if one turns up with different
     # wording, add it here.
-    return StockStatus.UNKNOWN, None
+    return StockStatus.UNKNOWN
+
+
+def split_size_color(variant: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """'Large, Moonstone' -> ('Large', 'Moonstone'). Every variant seen from
+    this portal is exactly "SIZE, COLOR" (maxsplit=1 in case a color name
+    ever contains a comma).
+    """
+    if not variant:
+        return None, None
+    parts = variant.split(",", 1)
+    if len(parts) != 2:
+        return variant.strip(), None
+    size, color = parts
+    return size.strip(), color.strip()
 
 
 class TransitionBikesScraper(BaseScraper):
@@ -144,7 +158,8 @@ class TransitionBikesScraper(BaseScraper):
                     continue
 
                 product_title, variant = split_product_and_variant(product_field)
-                status, quantity = normalize_status(raw_status)
+                size, color = split_size_color(variant)
+                status = normalize_status(raw_status)
                 regular_retail_price = parse_regular_retail_price(cell_texts[4:-1])
 
                 items.append(
@@ -153,8 +168,9 @@ class TransitionBikesScraper(BaseScraper):
                         sku=part_number,
                         product_title=product_title,
                         variant=variant,
+                        size=size,
+                        color=color,
                         status=status,
-                        quantity=quantity,
                         regular_retail_price=regular_retail_price,
                         raw_status_text=raw_status,
                         source_url=source_url,

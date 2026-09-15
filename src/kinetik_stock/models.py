@@ -8,6 +8,7 @@ from typing import Optional
 
 class StockStatus(str, Enum):
     IN_STOCK = "in_stock"
+    LOW_STOCK = "low_stock"
     OUT_OF_STOCK = "out_of_stock"
     ETA = "eta"
     DISCONTINUED = "discontinued"
@@ -26,6 +27,8 @@ class StockItem:
     regular_retail_price: Optional[float] = None
     eta_date: Optional[str] = None
     variant: Optional[str] = None
+    size: Optional[str] = None
+    color: Optional[str] = None
     raw_status_text: str = ""
     source_url: str = ""
     scraped_at: str = field(
@@ -33,15 +36,17 @@ class StockItem:
     )
 
     def as_csv_row(self) -> dict:
-        # Kept deliberately lean (product name, part number, price,
-        # availability) - the fuller detail above (variant, quantity,
-        # raw portal text, timestamps) stays on the object for internal use
-        # but isn't written to the CSV, which otherwise gets noisy fast
-        # across hundreds of SKUs.
+        # Kept deliberately lean (product name, size, color, part number,
+        # price, availability) - the fuller detail above (combined variant,
+        # quantity, raw portal text, timestamps) stays on the object for
+        # internal use but isn't written to the CSV, which otherwise gets
+        # noisy fast across hundreds of SKUs.
         return {
             "brand": self.brand,
             "sku": self.sku,
             "product_title": self.product_title,
+            "size": self.size or "",
+            "color": self.color or "",
             "regular_retail": (
                 "" if self.regular_retail_price is None else self.regular_retail_price
             ),
@@ -53,6 +58,8 @@ CSV_FIELDNAMES = [
     "brand",
     "sku",
     "product_title",
+    "size",
+    "color",
     "regular_retail",
     "availability",
 ]
