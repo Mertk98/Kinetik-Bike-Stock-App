@@ -47,10 +47,11 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled: fetch_stock() isn't implemented yet - Norco's B2B portal (LTP
-  # Dealer) has no single stock-list page like Transition Bikes does, and
-  # the crawling approach it needs is still being worked out. login() is
-  # confirmed against the real login form.
+  # Disabled: fetch_stock() works against a confirmed real product page, but
+  # depends on config/norco_items.csv (one item/part number per bike model)
+  # which is still empty - LTP's own nav/search can't reliably build that
+  # model list for us, so the user maintains it by hand. Flip to enabled
+  # once that CSV has rows and a live login is confirmed.
   - key: norco
     name: "Norco"
     portal_url: "https://ltpdealer.com/"
