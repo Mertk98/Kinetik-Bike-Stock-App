@@ -102,11 +102,16 @@ def _status_and_eta(row: dict) -> tuple[StockStatus, Optional[str]]:
     if eta_info is not None:
         return StockStatus.PRE_ORDER, _format_eta_date(eta_info["eta_date"])
 
-    # TODO: the user says the portal's "Available" column can also show
-    # "Discontinued" as plain text, distinct from "Out of Stock" - but no
-    # field in a real row has confirmed that yet (every zero-qty, no-ETA
-    # row seen so far would just be a plain out-of-stock). Falls back to
-    # OUT_OF_STOCK until a real discontinued example turns up.
+    # Confirmed against two real products: "active": 0 marks a discontinued
+    # item (Sight C1 150 - active 0 on every row, no restock coming), while
+    # "active": 1 with zero qty and no ETA is a plain temporary sellout
+    # (Sight C3 150 MX). active=0 doesn't necessarily mean the whole model
+    # is done, though - Sight C1 150's Size 2 row is active=0 but still had
+    # 1 unit on hand, so quantity is still checked first above; this only
+    # fires once we already know there's nothing left to sell.
+    if row.get("active") == 0:
+        return StockStatus.DISCONTINUED, None
+
     return StockStatus.OUT_OF_STOCK, None
 
 
@@ -143,9 +148,8 @@ class NorcoScraper(BaseScraper):
     Unverified: whether a single-match item-number search really does
     auto-navigate client-side from the search-results shell to this product
     page (inferred, not observed end-to-end - see the comment above
-    ITEM_SEARCH_URL_TEMPLATE), what field (if any) marks a "Discontinued"
-    item distinctly from a plain out-of-stock one, and whether there's a
-    "low stock" distinction at all - see _status_and_eta().
+    ITEM_SEARCH_URL_TEMPLATE) and whether there's a "low stock" distinction
+    at all - see _status_and_eta().
     """
 
     def login(self) -> None:
