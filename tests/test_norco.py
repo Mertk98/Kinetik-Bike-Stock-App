@@ -19,6 +19,11 @@ FIXTURE_PRODUCT_PAGE = (
     .resolve()
     .as_uri()
 )
+FIXTURE_TORRENT_PAGE = (
+    (Path(__file__).parent / "fixtures" / "norco_product" / "torrent_dh_a1.html")
+    .resolve()
+    .as_uri()
+)
 
 
 def make_brand_config() -> BrandConfig:
@@ -50,9 +55,26 @@ def test_status_and_eta_out_of_stock():
     assert _status_and_eta(row) == (StockStatus.OUT_OF_STOCK, None)
 
 
-def test_status_and_eta_pre_order():
-    row = {"qty_availh": 0, "qty_availnh": 0, "eta_h": "2026-12-01", "eta_nh": "N"}
-    assert _status_and_eta(row) == (StockStatus.PRE_ORDER, "2026-12-01")
+def test_status_and_eta_pre_order_from_real_eta_object():
+    row = {
+        "qty_availh": 0,
+        "qty_availnh": 0,
+        "eta_h": {"eta_date": "02-15-2027", "qty_eta": 25},
+        "eta_nh": {"eta_date": "02-15-2027", "qty_eta": 25},
+    }
+    assert _status_and_eta(row) == (StockStatus.PRE_ORDER, "2027-02-15")
+
+
+def test_status_and_eta_in_stock_even_with_eta_object_on_other_warehouse():
+    # An ETA object on a warehouse that isn't the one with current stock is
+    # a restock-in-transit signal, not a change to the item's current status.
+    row = {
+        "qty_availh": 15,
+        "qty_availnh": 0,
+        "eta_h": "N",
+        "eta_nh": {"eta_date": "02-15-2027", "qty_eta": 18},
+    }
+    assert _status_and_eta(row) == (StockStatus.IN_STOCK, None)
 
 
 def test_extract_stock_items_from_real_product_page_structure():
@@ -86,3 +108,31 @@ def test_extract_stock_items_from_real_product_page_structure():
 
     for item in items:
         assert item.brand == "Norco"
+
+
+def test_extract_stock_items_handles_real_eta_object():
+    brand_config = make_brand_config()
+
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = NorcoScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_TORRENT_PAGE)
+                items = scraper._extract_stock_items_from_current_page()
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    assert len(items) == 2
+    by_sku = {item.sku: item for item in items}
+
+    in_stock = by_sku["0634017714"]
+    assert in_stock.status == StockStatus.IN_STOCK
+    assert in_stock.eta_date is None
+
+    pre_order = by_sku["0634017916"]
+    assert pre_order.status == StockStatus.PRE_ORDER
+    assert pre_order.eta_date == "2027-02-15"
+    assert pre_order.product_title == "TORRENT DH A1"

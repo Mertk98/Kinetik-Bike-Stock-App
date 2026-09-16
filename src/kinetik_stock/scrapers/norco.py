@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import csv
+import logging
+import re
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from kinetik_stock.config import REPO_ROOT
 from kinetik_stock.models import StockItem, StockStatus
@@ -22,16 +26,26 @@ LOGGED_IN_SELECTOR = "a[href='/logout.sa']"
 LOGGED_IN_CHECK_TIMEOUT_MS = 10000
 
 # LTP's own search is unreliable by bike name (confirmed by the user), but
-# searching by an exact item/part number always lands directly on that
-# item's product page - and the product page shows a table of every size/
-# color variant of that same model, not just the one item number searched.
-# So we only need ONE representative item number per bike model, not one
-# per SKU. That list isn't derivable from the portal itself (no full model
-# list/nav crawl gets us there reliably) - it comes from
+# searching by an exact item/part number always resolves to exactly one
+# match. Confirmed against a real search: /ld/itemsearch?q=<item_number>
+# itself only returns a search-results shell (a Solr JSON blob with that
+# one item's summary, no size/color table) - the rich product page (with
+# the full columnsjsondata table below) is reached by the site's own JS
+# auto-navigating there for a single-match search. UNVERIFIED: that
+# auto-navigation itself (inferred from the search-results HTML plus a
+# separately-provided product page for the same item, not observed
+# end-to-end) - _scrape_item_page() waits for columnsjsondata to appear on
+# whatever page we land on, and fails loudly if it never does.
+#
+# Either way we only need ONE representative item number per bike model,
+# not one per SKU, since the product page's table covers every size/color
+# of that model. That list isn't derivable from the portal itself (no full
+# model list/nav crawl gets us there reliably) - it comes from
 # config/norco_items.csv, a "model,item_number" CSV the user maintains by
 # hand from their own records.
 ITEM_SEARCH_URL_TEMPLATE = "https://ltpdealer.com/ld/itemsearch?q={item_number}"
 ITEM_LOOKUP_CSV = REPO_ROOT / "config" / "norco_items.csv"
+PRODUCT_PAGE_LOAD_TIMEOUT_MS = 15000
 
 # Column labels vary by product line (e.g. an e-bike page might add "Motor"),
 # so columns are matched by their header text, not by a fixed col_N index.
@@ -39,6 +53,15 @@ ITEM_LOOKUP_CSV = REPO_ROOT / "config" / "norco_items.csv"
 # in case another product category spells it differently.
 COLOR_LABELS = ("colour", "color")
 SIZE_LABELS = ("frame size", "size")
+
+# Confirmed against a real product page (Torrent DH A1): when a warehouse
+# has zero on hand, eta_h/eta_nh/eta_nh_2 is either the string "N" (no ETA
+# at all) or an object like {"eta_date": "02-15-2027", "qty_eta": 25, ...}
+# - MM-DD-YYYY. When there IS existing stock (qty > 0), an ETA object can
+# still appear on a *different* warehouse field (restock in transit) - that
+# doesn't change the item's current status, just its future quantity, so
+# on-hand quantity always takes priority over any ETA object.
+ETA_DATE_RE = re.compile(r"^(\d{2})-(\d{2})-(\d{4})$")
 
 
 def _find_col_key(label_to_col: dict[str, str], candidates: tuple[str, ...]) -> Optional[str]:
@@ -48,15 +71,24 @@ def _find_col_key(label_to_col: dict[str, str], candidates: tuple[str, ...]) -> 
     return None
 
 
-def _status_and_eta(row: dict) -> tuple[StockStatus, Optional[str]]:
-    # UNVERIFIED: every real row we've seen so far has eta_h/eta_nh == "N"
-    # (no ETA). We don't yet know what an actual ETA value looks like, so
-    # this treats anything other than "N"/blank as a raw pre-order marker
-    # until a real example turns up.
-    eta_raw = row.get("eta_h") or row.get("eta_nh")
-    if eta_raw and eta_raw != "N":
-        return StockStatus.PRE_ORDER, eta_raw
+def _format_eta_date(raw: str) -> str:
+    match = ETA_DATE_RE.match(raw)
+    if not match:
+        logger.warning("ETA date %r didn't match the expected MM-DD-YYYY format", raw)
+        return raw
+    month, day, year = match.groups()
+    return f"{year}-{month}-{day}"
 
+
+def _extract_eta_info(row: dict) -> Optional[dict]:
+    for key in ("eta_h", "eta_nh", "eta_nh_2"):
+        value = row.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+def _status_and_eta(row: dict) -> tuple[StockStatus, Optional[str]]:
     # No "low stock" bucket is exposed here (unlike Transition Bikes' plain-
     # text "Low Stock (N)") - just raw quantities per warehouse, summed
     # across every warehouse this dealer can draw from.
@@ -65,6 +97,16 @@ def _status_and_eta(row: dict) -> tuple[StockStatus, Optional[str]]:
     )
     if qty > 0:
         return StockStatus.IN_STOCK, None
+
+    eta_info = _extract_eta_info(row)
+    if eta_info is not None:
+        return StockStatus.PRE_ORDER, _format_eta_date(eta_info["eta_date"])
+
+    # TODO: the user says the portal's "Available" column can also show
+    # "Discontinued" as plain text, distinct from "Out of Stock" - but no
+    # field in a real row has confirmed that yet (every zero-qty, no-ETA
+    # row seen so far would just be a plain out-of-stock). Falls back to
+    # OUT_OF_STOCK until a real discontinued example turns up.
     return StockStatus.OUT_OF_STOCK, None
 
 
@@ -98,8 +140,11 @@ class NorcoScraper(BaseScraper):
     search/nav isn't reliable enough to discover the model list itself) and
     reads that whole table per model.
 
-    Unverified: what an actual ETA value looks like (every real row seen so
-    far has eta_h/eta_nh == "N", i.e. no ETA) and whether there's a
+    Unverified: whether a single-match item-number search really does
+    auto-navigate client-side from the search-results shell to this product
+    page (inferred, not observed end-to-end - see the comment above
+    ITEM_SEARCH_URL_TEMPLATE), what field (if any) marks a "Discontinued"
+    item distinctly from a plain out-of-stock one, and whether there's a
     "low stock" distinction at all - see _status_and_eta().
     """
 
@@ -130,6 +175,16 @@ class NorcoScraper(BaseScraper):
 
     def _scrape_item_page(self, item_number: str) -> list[StockItem]:
         self.page.goto(ITEM_SEARCH_URL_TEMPLATE.format(item_number=item_number))
+        try:
+            self.page.wait_for_function(
+                "typeof columnsjsondata !== 'undefined'",
+                timeout=PRODUCT_PAGE_LOAD_TIMEOUT_MS,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Searching for item {item_number!r} never reached a product page "
+                f"(stuck at {self.page.url}) - confirm it's a valid item number."
+            ) from exc
         return self._extract_stock_items_from_current_page()
 
     def _extract_stock_items_from_current_page(self) -> list[StockItem]:
