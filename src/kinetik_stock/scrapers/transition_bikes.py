@@ -156,10 +156,11 @@ def parse_bike_name_and_build_kit(product_title: str) -> tuple[str, Optional[str
     'Complete: Regulator CX Deore - USA' -> ('Regulator CX', 'Deore') - a
     region suffix after ' - ' is dropped since it's not part of the build kit.
 
-    Note: if a youth-specific bike's B2B product title doesn't actually say
-    "Sentinel Youth" (we have no confirmed example - no youth-Sentinel SKUs
-    have shown up in the stock data yet), this can't tell it apart from the
-    adult Sentinel by text alone and will misattribute it.
+    The B2B portal's title never actually says "Sentinel Youth" - the Youth
+    Sentinel just appears as plain "Sentinel" (confirmed by the user: it's
+    the X-Small size, which the adult lineup doesn't offer). This function
+    can't see size, so it always returns "Sentinel" here; callers that also
+    have the row's size must apply apply_sentinel_youth_override() after.
     """
     text = product_title.strip()
     if text.lower().startswith("complete:"):
@@ -182,6 +183,16 @@ def parse_bike_name_and_build_kit(product_title: str) -> tuple[str, Optional[str
             product_title,
         )
     return bike_name, build_kit
+
+
+def apply_sentinel_youth_override(bike_name: str, size: Optional[str]) -> str:
+    """The adult Sentinel lineup's smallest size is Small - X-Small only
+    shows up for the Youth Sentinel, which has its own product page
+    (SentinelYouth) despite sharing the plain "Sentinel" B2B title.
+    """
+    if bike_name == "Sentinel" and size and size.strip().lower().startswith("x-small"):
+        return "Sentinel Youth"
+    return bike_name
 
 
 def product_page_url(bike_name: str) -> str:
@@ -329,6 +340,7 @@ class TransitionBikesScraper(BaseScraper):
             # extra page visit per SKU, so skip everything else.
             if status == StockStatus.ETA and size and color:
                 bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
+                bike_name = apply_sentinel_youth_override(bike_name, size)
                 item.eta_date = self._fetch_eta_date(bike_name, build_kit or "", color, size)
 
             items.append(item)

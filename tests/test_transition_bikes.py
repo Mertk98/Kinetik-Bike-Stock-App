@@ -13,6 +13,7 @@ from kinetik_stock.scrapers.transition_bikes import (
     BIKE_MODELS,
     CLOSEOUT_MODELS,
     TransitionBikesScraper,
+    apply_sentinel_youth_override,
     closeout_page_url,
     normalize_status,
     parse_bike_name_and_build_kit,
@@ -99,6 +100,9 @@ def test_closeout_models_has_all_8_closeout_models():
 
 
 def test_parse_bike_name_disambiguates_sentinel_youth():
+    # Confirmed the B2B title never actually says "Sentinel Youth" - the
+    # youth model shows up as plain "Sentinel" with an X-Small size, which
+    # apply_sentinel_youth_override() (tested below) reclassifies.
     assert parse_bike_name_and_build_kit("Complete: Sentinel Youth Alloy XT") == (
         "Sentinel Youth",
         "Alloy XT",
@@ -107,6 +111,19 @@ def test_parse_bike_name_disambiguates_sentinel_youth():
         "Sentinel",
         "Alloy Deore",
     )
+
+
+def test_apply_sentinel_youth_override():
+    # X-Small Sentinel is actually the Youth model (the adult lineup's
+    # smallest size is Small).
+    assert apply_sentinel_youth_override("Sentinel", "X-Small") == "Sentinel Youth"
+    assert apply_sentinel_youth_override("Sentinel", "X-Small, Graphite Grey") == "Sentinel Youth"
+    # Any other Sentinel size stays the adult model.
+    assert apply_sentinel_youth_override("Sentinel", "Small") == "Sentinel"
+    assert apply_sentinel_youth_override("Sentinel", "X-Large") == "Sentinel"
+    # X-Small on an unrelated model shouldn't be touched.
+    assert apply_sentinel_youth_override("Spire", "X-Small") == "Spire"
+    assert apply_sentinel_youth_override("Sentinel", None) == "Sentinel"
 
 
 def test_parse_eta_message():
