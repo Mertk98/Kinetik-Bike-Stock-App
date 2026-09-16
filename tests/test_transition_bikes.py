@@ -9,6 +9,7 @@ from kinetik_stock.browser import launch_chromium
 from kinetik_stock.config import BrandConfig
 from kinetik_stock.models import StockStatus
 from kinetik_stock.scrapers.transition_bikes import (
+    BIKE_MODELS,
     TransitionBikesScraper,
     normalize_status,
     parse_bike_name_and_build_kit,
@@ -77,6 +78,25 @@ def test_parse_bike_name_and_build_kit():
 
 def test_product_page_url():
     assert product_page_url("Repeater PT") == "https://www.transitionbikes.com/Bikes/RepeaterPT"
+
+
+def test_bike_models_has_all_18_current_models():
+    assert len(BIKE_MODELS) == 18
+    assert BIKE_MODELS["Sentinel Youth"] == "SentinelYouth"
+    assert BIKE_MODELS["Sentinel"] == "Sentinel"
+    assert BIKE_MODELS["PBJ 24"] == "PBJ24"
+    assert BIKE_MODELS["TransAM"] == "TransAM"
+
+
+def test_parse_bike_name_disambiguates_sentinel_youth():
+    assert parse_bike_name_and_build_kit("Complete: Sentinel Youth Alloy XT") == (
+        "Sentinel Youth",
+        "Alloy XT",
+    )
+    assert parse_bike_name_and_build_kit("Complete: Sentinel Alloy Deore") == (
+        "Sentinel",
+        "Alloy Deore",
+    )
 
 
 def test_parse_eta_message():

@@ -110,11 +110,43 @@ def split_size_color(variant: Optional[str]) -> tuple[Optional[str], Optional[st
     return size.strip(), color.strip()
 
 
-# Model names that are two words - everything else is assumed to be the
-# single first word of the (Complete:-stripped) product title. Confirmed
-# against the storefront nav: transitionbikes.com/Bikes/<name with the
-# space removed>, e.g. "Repeater PT" -> /Bikes/RepeaterPT.
-TWO_WORD_BIKE_NAMES = ["PBJ 24", "Regulator CX", "Regulator SX", "Repeater PT"]
+# All 18 current models, from the site's own nav (transitionbikes.com):
+# Dirt Jump (PBJ, PBJ 24), eMTB (Regulator CX, Regulator SX, Repeater PT,
+# Relay), Mountain (Spire, Patrol, Sentinel, Smuggler, Spur, Scout), Gravity
+# (TR11, Bottlerocket), Youth-only (Sentinel Youth, Ripcord, Bandit - Scout
+# and PBJ 24 are cross-listed under Youth but share the same model/URL as
+# above, not separate models), plus TransAM (sold as Complete Bikes stock
+# but only linked from the Closeout section, not a top-level nav category).
+# Maps display name (as it appears at the start of a product title, once
+# "Complete: " and any " - USA"/"- INT" suffix are stripped) to its
+# storefront URL slug - normally just the name with spaces removed, but kept
+# explicit so a naming exception doesn't silently break the URL.
+BIKE_MODELS: dict[str, str] = {
+    "PBJ": "PBJ",
+    "PBJ 24": "PBJ24",
+    "Regulator CX": "RegulatorCX",
+    "Regulator SX": "RegulatorSX",
+    "Repeater PT": "RepeaterPT",
+    "Relay": "Relay",
+    "Spire": "Spire",
+    "Patrol": "Patrol",
+    "Sentinel": "Sentinel",
+    "Smuggler": "Smuggler",
+    "Spur": "Spur",
+    "Scout": "Scout",
+    "TR11": "TR11",
+    "Bottlerocket": "Bottlerocket",
+    "Sentinel Youth": "SentinelYouth",
+    "Ripcord": "Ripcord",
+    "Bandit": "Bandit",
+    "TransAM": "TransAM",
+}
+
+# Longest (most words) first, so "Sentinel Youth" matches before the
+# single-word fallback would otherwise split it as "Sentinel" + "Youth ...".
+_MULTI_WORD_MODEL_NAMES = sorted(
+    (name for name in BIKE_MODELS if " " in name), key=len, reverse=True
+)
 
 PRODUCT_PAGE_BASE_URL = "https://www.transitionbikes.com/Bikes"
 
@@ -123,13 +155,18 @@ def parse_bike_name_and_build_kit(product_title: str) -> tuple[str, Optional[str
     """'Complete: Repeater PT Carbon AXS' -> ('Repeater PT', 'Carbon AXS').
     'Complete: Regulator CX Deore - USA' -> ('Regulator CX', 'Deore') - a
     region suffix after ' - ' is dropped since it's not part of the build kit.
+
+    Note: if a youth-specific bike's B2B product title doesn't actually say
+    "Sentinel Youth" (we have no confirmed example - no youth-Sentinel SKUs
+    have shown up in the stock data yet), this can't tell it apart from the
+    adult Sentinel by text alone and will misattribute it.
     """
     text = product_title.strip()
     if text.lower().startswith("complete:"):
         text = text[len("complete:") :].strip()
     text = text.split(" - ", 1)[0].strip()
 
-    for name in TWO_WORD_BIKE_NAMES:
+    for name in _MULTI_WORD_MODEL_NAMES:
         if text == name or text.startswith(name + " "):
             build_kit = text[len(name) :].strip()
             return name, build_kit or None
@@ -137,11 +174,26 @@ def parse_bike_name_and_build_kit(product_title: str) -> tuple[str, Optional[str
     parts = text.split(" ", 1)
     bike_name = parts[0]
     build_kit = parts[1].strip() if len(parts) > 1 else None
+    if bike_name not in BIKE_MODELS:
+        logger.warning(
+            "Bike name %r parsed from %r isn't in the known 18-model list - "
+            "check for a new/renamed model.",
+            bike_name,
+            product_title,
+        )
     return bike_name, build_kit
 
 
 def product_page_url(bike_name: str) -> str:
-    return f"{PRODUCT_PAGE_BASE_URL}/{bike_name.replace(' ', '')}"
+    slug = BIKE_MODELS.get(bike_name)
+    if slug is None:
+        logger.warning(
+            "%r isn't in the known model list - guessing its URL slug by "
+            "removing spaces.",
+            bike_name,
+        )
+        slug = bike_name.replace(" ", "")
+    return f"{PRODUCT_PAGE_BASE_URL}/{slug}"
 
 
 # Confirmed against the real Repeater PT product page: each size/color combo
