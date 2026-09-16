@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -21,6 +21,11 @@ class BrandConfig:
     scraper: str
     username_env: str
     password_env: str
+    # Most portals only need username/password, but some (e.g. Norco's LTP
+    # Dealer login) also require a dealer/account ID or similar third field.
+    # Maps a logical name a scraper can ask for (e.g. "dealer_id") to the
+    # .env variable holding it.
+    extra_env: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
 
     @property
@@ -31,8 +36,16 @@ class BrandConfig:
     def password(self) -> Optional[str]:
         return os.environ.get(self.password_env)
 
+    def extra(self, key: str) -> Optional[str]:
+        env_name = self.extra_env.get(key)
+        return os.environ.get(env_name) if env_name else None
+
+    def missing_credential_envs(self) -> list[str]:
+        names = [self.username_env, self.password_env, *self.extra_env.values()]
+        return [name for name in names if not os.environ.get(name)]
+
     def credentials_present(self) -> bool:
-        return bool(self.username and self.password)
+        return not self.missing_credential_envs()
 
 
 def _resolve_portal_url(portal_url: str) -> str:
@@ -61,6 +74,7 @@ def load_brand_configs(path: Path = BRANDS_CONFIG_PATH) -> list[BrandConfig]:
                 scraper=entry["scraper"],
                 username_env=entry["username_env"],
                 password_env=entry["password_env"],
+                extra_env=entry.get("extra_env", {}),
                 enabled=entry.get("enabled", True),
             )
         )

@@ -27,10 +27,8 @@ def select_brands(
 
 def run_brand(brand: BrandConfig, browser, *, headless: bool) -> list[StockItem]:
     if not brand.credentials_present():
-        raise RuntimeError(
-            f"Missing credentials for '{brand.key}': set {brand.username_env} "
-            f"and {brand.password_env} in .env"
-        )
+        missing = ", ".join(brand.missing_credential_envs())
+        raise RuntimeError(f"Missing credentials for '{brand.key}': set {missing} in .env")
 
     scraper_class = load_scraper_class(brand.scraper)
     scraper = scraper_class(brand, browser, headless=headless)

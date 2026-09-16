@@ -46,3 +46,17 @@ brands:
     username_env: "TRANSITION_BIKES_USERNAME"
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
+
+  # Disabled: fetch_stock() isn't implemented yet - Norco's B2B portal (LTP
+  # Dealer) has no single stock-list page like Transition Bikes does, and
+  # the crawling approach it needs is still being worked out. login() is
+  # confirmed against the real login form.
+  - key: norco
+    name: "Norco"
+    portal_url: "https://ltpdealer.com/"
+    scraper: "kinetik_stock.scrapers.norco.NorcoScraper"
+    username_env: "NORCO_USERNAME"
+    password_env: "NORCO_PASSWORD"
+    extra_env:
+      dealer_id: "NORCO_DEALER_ID"
+    enabled: false
