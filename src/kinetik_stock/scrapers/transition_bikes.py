@@ -196,6 +196,29 @@ def product_page_url(bike_name: str) -> str:
     return f"{PRODUCT_PAGE_BASE_URL}/{slug}"
 
 
+# These models also have a separate clearance page at /Bikes/Closeout/<slug>
+# selling older colors/specs no longer on the main /Bikes/<slug> page.
+# Confirmed from the site's own nav (the "CLOSEOUT" menu). A closeout SKU's
+# color/size may only be findable there, not on the main page.
+CLOSEOUT_MODELS = {
+    "TR11",
+    "Regulator SX",
+    "Repeater PT",
+    "Relay",
+    "Spire",
+    "Sentinel",
+    "Spur",
+    "TransAM",
+}
+
+
+def closeout_page_url(bike_name: str) -> Optional[str]:
+    if bike_name not in CLOSEOUT_MODELS:
+        return None
+    slug = BIKE_MODELS.get(bike_name, bike_name.replace(" ", ""))
+    return f"{PRODUCT_PAGE_BASE_URL}/Closeout/{slug}"
+
+
 # Confirmed against the real Repeater PT product page: each size/color combo
 # is a ".ProductSelectorBox" div carrying the data directly as attributes -
 # refNameText (size, e.g. "Small "), a class matching the color's hex code
@@ -225,9 +248,9 @@ class TransitionBikesScraper(BaseScraper):
     login() and fetch_stock() are wired up and confirmed against real
     portal HTML/data. ETA lookup (_fetch_eta_date) is confirmed against one
     real product page (Repeater PT, single build kit) - the multi-build-kit
-    path (clicking a different build before reading colors/sizes) is
-    unverified since we haven't seen an example with more than one build
-    kit on the page.
+    path (clicking a different build before reading colors/sizes) and the
+    closeout-page fallback are unverified since we haven't seen an example
+    of either yet.
     """
 
     def __init__(self, brand_config, browser, *, headless: bool = True):
@@ -306,17 +329,46 @@ class TransitionBikesScraper(BaseScraper):
             # extra page visit per SKU, so skip everything else.
             if status == StockStatus.ETA and size and color:
                 bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
-                item.eta_date = self._fetch_eta_date(
-                    product_page_url(bike_name), build_kit or "", color, size
-                )
+                item.eta_date = self._fetch_eta_date(bike_name, build_kit or "", color, size)
 
             items.append(item)
 
         return items
 
     def _fetch_eta_date(
-        self, product_url: str, build_kit: str, color: str, size: str
+        self, bike_name: str, build_kit: str, color: str, size: str
     ) -> Optional[str]:
+        found, eta_date = self._read_eta_from_page(
+            product_page_url(bike_name), build_kit, color, size
+        )
+        if found:
+            return eta_date
+
+        # Not on the main page - for models with a closeout page, an older
+        # color/size might only be listed there instead.
+        closeout_url = closeout_page_url(bike_name)
+        if closeout_url is not None:
+            found, eta_date = self._read_eta_from_page(closeout_url, build_kit, color, size)
+            if found:
+                return eta_date
+
+        logger.debug(
+            "No matching size/color box for %s/%s on either the main or closeout "
+            "page for %r",
+            size,
+            color,
+            bike_name,
+        )
+        return None
+
+    def _read_eta_from_page(
+        self, product_url: str, build_kit: str, color: str, size: str
+    ) -> tuple[bool, Optional[str]]:
+        """Returns (found, eta_date): found is False if this page has no
+        matching size/color box at all (the caller may then try a fallback
+        URL), True if it does (whatever its ETA - including None, meaning
+        it's not actually pre-order on this page).
+        """
         if self._eta_page_url != product_url:
             self.page.goto(product_url)
             self._eta_page_url = product_url
@@ -355,7 +407,7 @@ class TransitionBikesScraper(BaseScraper):
 
         if color_code is None:
             logger.debug("No color swatch matched %r on %s", color, product_url)
-            return None
+            return False, None
 
         size_lower = size.strip().lower()
         size_first_word = size_lower.split()[0] if size_lower else ""
@@ -371,7 +423,6 @@ class TransitionBikesScraper(BaseScraper):
             if name_text != size_lower and name_text.split()[:1] != [size_first_word]:
                 continue
             message = box.get_attribute("refMessage") or ""
-            return parse_eta_message(message)
+            return True, parse_eta_message(message)
 
-        logger.debug("No matching size/color box for %s/%s on %s", size, color, product_url)
-        return None
+        return False, None
