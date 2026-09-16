@@ -1,8 +1,8 @@
 # Kinetik Bike Stock App
 
 Logs into each mountain bike brand's B2B dealer portal, scrapes availability
-(in stock / out of stock / ETA / discontinued), and writes a normalized CSV
-you can use to update Timesact Pre-Order availability on the Shopify store.
+(in stock / out of stock / pre-order / discontinued), and writes a normalized
+CSV you can use to update Timesact Pre-Order availability on the Shopify store.
 
 ## How it works
 
@@ -52,8 +52,8 @@ Kept deliberately lean - across hundreds of SKUs, extra columns add up fast:
 | size             | e.g. "Large", "X-Large MX", "One Size" - blank if not applicable |
 | color            | e.g. "Moonstone" - blank if not applicable                       |
 | regular_retail   | list price, if the portal exposes one, else blank                |
-| availability     | one of `in_stock`, `low_stock`, `out_of_stock`, `eta`, `discontinued`, `unknown` |
-| eta_date         | date shown on the bike's public product page, only looked up for `eta` rows - `N/A` otherwise (in-stock/out-of-stock/etc. bikes don't have one) |
+| availability     | one of `in_stock`, `low_stock`, `out_of_stock`, `pre_order`, `discontinued`, `unknown` |
+| eta_date         | date shown on the bike's public product page, only looked up for `pre_order` rows - `N/A` otherwise (in-stock/out-of-stock/etc. bikes don't have one) |
 
 More detail (exact quantity for low-stock items, variant split out
 separately, raw untouched portal text, source URL, scrape timestamp) is

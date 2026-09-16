@@ -37,7 +37,7 @@ def test_normalize_status():
     assert normalize_status("Out of Stock") == (StockStatus.OUT_OF_STOCK, None)
     assert normalize_status("Discontinued") == (StockStatus.DISCONTINUED, None)
     status, eta = normalize_status("ETA 2025-11-15")
-    assert status == StockStatus.ETA
+    assert status == StockStatus.PRE_ORDER
     assert eta == "2025-11-15"
     assert normalize_status("Something weird") == (StockStatus.UNKNOWN, None)
 
@@ -59,7 +59,7 @@ def test_scraper_login_and_fetch_stock(tmp_path):
     assert by_sku["EB-100-M"].status == StockStatus.IN_STOCK
     assert by_sku["EB-100-M"].quantity == 14
     assert by_sku["EB-100-L"].status == StockStatus.OUT_OF_STOCK
-    assert by_sku["EB-200-M"].status == StockStatus.ETA
+    assert by_sku["EB-200-M"].status == StockStatus.PRE_ORDER
     assert by_sku["EB-200-M"].eta_date == "2025-11-15"
     assert by_sku["EB-050-S"].status == StockStatus.DISCONTINUED
 

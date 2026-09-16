@@ -59,7 +59,7 @@ def test_normalize_status():
     assert normalize_status("In Stock") == StockStatus.IN_STOCK
     assert normalize_status("Out Of Stock") == StockStatus.OUT_OF_STOCK
     assert normalize_status("Low Stock (3)") == StockStatus.LOW_STOCK
-    assert normalize_status("Pre-Order") == StockStatus.ETA
+    assert normalize_status("Pre-Order") == StockStatus.PRE_ORDER
     assert normalize_status("Something weird") == StockStatus.UNKNOWN
 
 

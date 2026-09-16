@@ -12,7 +12,7 @@ from kinetik_stock.scrapers.base import BaseScraper
 # portal's exact wording (e.g. "Backorder", "Pre-Order", "Sold Out").
 STATUS_KEYWORDS: list[tuple[str, StockStatus]] = [
     ("discontinued", StockStatus.DISCONTINUED),
-    ("eta", StockStatus.ETA),
+    ("eta", StockStatus.PRE_ORDER),
     ("out of stock", StockStatus.OUT_OF_STOCK),
     ("in stock", StockStatus.IN_STOCK),
 ]
@@ -25,7 +25,7 @@ def normalize_status(raw_text: str) -> tuple[StockStatus, str | None]:
     for keyword, status in STATUS_KEYWORDS:
         if keyword in lowered:
             eta_date = None
-            if status == StockStatus.ETA:
+            if status == StockStatus.PRE_ORDER:
                 match = ETA_DATE_RE.search(raw_text)
                 eta_date = match.group(1) if match else None
             return status, eta_date

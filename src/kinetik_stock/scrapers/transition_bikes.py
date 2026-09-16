@@ -88,9 +88,7 @@ def normalize_status(raw_text: str) -> StockStatus:
     if lowered == "out of stock":
         return StockStatus.OUT_OF_STOCK
     if lowered == "pre-order":
-        # No specific date given by this portal - just a future-availability
-        # flag, which is what ETA means for our purposes.
-        return StockStatus.ETA
+        return StockStatus.PRE_ORDER
     # No "Discontinued" example seen yet - if one turns up with different
     # wording, add it here.
     return StockStatus.UNKNOWN
@@ -336,9 +334,9 @@ class TransitionBikesScraper(BaseScraper):
                 source_url=source_url,
             )
 
-            # Only pre-order/ETA bikes have a date to find, and it's an
+            # Only pre-order bikes have a date to find, and it's an
             # extra page visit per SKU, so skip everything else.
-            if status == StockStatus.ETA and size and color:
+            if status == StockStatus.PRE_ORDER and size and color:
                 bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
                 bike_name = apply_sentinel_youth_override(bike_name, size)
                 item.eta_date = self._fetch_eta_date(bike_name, build_kit or "", color, size)
