@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -36,16 +37,16 @@ LOGGED_IN_CHECK_TIMEOUT_MS = 10000
 # separately-provided product page for the same item, not observed
 # end-to-end) - _scrape_item_page() waits for columnsjsondata to appear on
 # whatever page we land on, and fails loudly if it never does.
-#
-# Either way we only need ONE representative item number per bike model,
-# not one per SKU, since the product page's table covers every size/color
-# of that model. That list isn't derivable from the portal itself (no full
-# model list/nav crawl gets us there reliably) - it comes from
-# config/norco_items.csv, a "model,item_number" CSV the user maintains by
-# hand from their own records.
 ITEM_SEARCH_URL_TEMPLATE = "https://ltpdealer.com/ld/itemsearch?q={item_number}"
-ITEM_LOOKUP_CSV = REPO_ROOT / "config" / "norco_items.csv"
 PRODUCT_PAGE_LOAD_TIMEOUT_MS = 15000
+
+# config/norco_items.csv is the user's own inventory export, not something
+# we generate: "System ID" (their internal product ID), "Manufact. SKU"
+# (the LTP item/part number to search - can be blank when their system
+# doesn't have one on file yet), "Item" (their own free-text model/size/
+# color description, kept only for the report - not parsed for anything).
+NORCO_ITEMS_CSV = REPO_ROOT / "config" / "norco_items.csv"
+NORCO_REPORT_FIELDNAMES = ["System ID", "Manufact. SKU", "Item", "Status", "ETA"]
 
 # Column labels vary by product line (e.g. an e-bike page might add "Motor"),
 # so columns are matched by their header text, not by a fixed col_N index.
@@ -115,20 +116,46 @@ def _status_and_eta(row: dict) -> tuple[StockStatus, Optional[str]]:
     return StockStatus.OUT_OF_STOCK, None
 
 
-def _load_item_lookup() -> list[tuple[str, str]]:
-    if not ITEM_LOOKUP_CSV.exists():
+def _report_status_and_eta(item: StockItem) -> tuple[str, str]:
+    """Formats a scraped StockItem into the specific wording the user's own
+    LTP/Norco report expects, distinct from the generic StockStatus values
+    used in the shared multi-brand CSV (models.py's as_csv_row()).
+    """
+    if item.status == StockStatus.IN_STOCK:
+        return f"Available ({item.quantity})", "Now"
+    if item.status == StockStatus.PRE_ORDER:
+        return "pre-order", item.eta_date or "N/A"
+    if item.status == StockStatus.DISCONTINUED:
+        return "Discontinued", "N/A"
+    return "Out of Stock", "N/A"
+
+
+def _load_norco_items(path: Path = NORCO_ITEMS_CSV) -> list[dict]:
+    if not path.exists():
         raise FileNotFoundError(
-            f"{ITEM_LOOKUP_CSV} not found - add a CSV with 'model,item_number' "
-            "columns (one representative item/part number per bike model; its "
-            "product page lists every size/color variant of that model)."
+            f"{path} not found - add a CSV with 'System ID', 'Manufact. SKU', "
+            "'Item' columns (the user's own inventory export)."
         )
-    with open(ITEM_LOOKUP_CSV, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8") as f:
         rows = [
-            (row["model"].strip(), row["item_number"].strip()) for row in csv.DictReader(f)
+            {
+                "system_id": row["System ID"].strip(),
+                "item_number": (row.get("Manufact. SKU") or "").strip(),
+                "item_text": row["Item"].strip(),
+            }
+            for row in csv.DictReader(f)
         ]
     if not rows:
-        raise ValueError(f"{ITEM_LOOKUP_CSV} has no rows - add at least one model/item_number.")
+        raise ValueError(f"{path} has no rows.")
     return rows
+
+
+def write_norco_report_csv(rows: list[dict], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=NORCO_REPORT_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 class NorcoScraper(BaseScraper):
@@ -140,10 +167,17 @@ class NorcoScraper(BaseScraper):
     item's product page, which embeds a JS variable (`columnsjsondata`)
     listing every size/color variant of that model with its own item
     number, price, and per-warehouse quantity - confirmed against a real
-    product page (Sight C1 160). So fetch_stock() looks up one item number
-    per model (from config/norco_items.csv, maintained by hand - LTP's own
-    search/nav isn't reliable enough to discover the model list itself) and
-    reads that whole table per model.
+    product page (Sight C1 160).
+
+    config/norco_items.csv is the user's own inventory export (System ID,
+    Manufact. SKU, Item) - one row per exact SKU they carry, not one per
+    model. fetch_stock() looks up each row's item number and keeps only the
+    matching row from that model's page, for the shared multi-brand CSV
+    pipeline. generate_availability_report() instead reproduces the user's
+    own report format - the original 3 columns plus Status/ETA text
+    formatted their way ("Available (N)"/"Now", "pre-order"/<date>,
+    "Discontinued"/"N/A", "Out of Stock"/"N/A") - including rows with no
+    Manufact. SKU on file, which can't be looked up at all.
 
     Unverified: whether a single-match item-number search really does
     auto-navigate client-side from the search-results shell to this product
@@ -173,9 +207,80 @@ class NorcoScraper(BaseScraper):
 
     def fetch_stock(self) -> list[StockItem]:
         items: list[StockItem] = []
-        for _model_name, item_number in _load_item_lookup():
-            items.extend(self._scrape_item_page(item_number))
+        for row in _load_norco_items():
+            item_number = row["item_number"]
+            if not item_number:
+                logger.warning(
+                    "No Manufact. SKU on file for %r (System ID %s) - skipping.",
+                    row["item_text"],
+                    row["system_id"],
+                )
+                continue
+            page_items = self._scrape_item_page(item_number)
+            matched = next((i for i in page_items if i.sku == item_number), None)
+            if matched is None:
+                logger.warning(
+                    "Item %s (%r) wasn't found on its own product page.",
+                    item_number,
+                    row["item_text"],
+                )
+                continue
+            items.append(matched)
         return items
+
+    def generate_availability_report(
+        self, input_csv: Path = NORCO_ITEMS_CSV
+    ) -> list[dict]:
+        """Produces the user's own report format: the input CSV's 3 columns
+        plus Status/ETA, in their own wording rather than the generic
+        StockStatus/eta_date used by the shared multi-brand CSV pipeline.
+        """
+        report_rows: list[dict] = []
+        for row in _load_norco_items(input_csv):
+            system_id, item_number, item_text = (
+                row["system_id"],
+                row["item_number"],
+                row["item_text"],
+            )
+            status_text, eta_text = "N/A", "N/A"
+
+            if not item_number:
+                logger.warning(
+                    "No Manufact. SKU on file for %r (System ID %s) - can't look up.",
+                    item_text,
+                    system_id,
+                )
+            else:
+                try:
+                    page_items = self._scrape_item_page(item_number)
+                    matched = next(
+                        (i for i in page_items if i.sku == item_number), None
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to look up item %s (%r)", item_number, item_text
+                    )
+                    matched = None
+
+                if matched is None:
+                    logger.warning(
+                        "Item %s (%r) wasn't found on its own product page.",
+                        item_number,
+                        item_text,
+                    )
+                else:
+                    status_text, eta_text = _report_status_and_eta(matched)
+
+            report_rows.append(
+                {
+                    "System ID": system_id,
+                    "Manufact. SKU": item_number,
+                    "Item": item_text,
+                    "Status": status_text,
+                    "ETA": eta_text,
+                }
+            )
+        return report_rows
 
     def _scrape_item_page(self, item_number: str) -> list[StockItem]:
         self.page.goto(ITEM_SEARCH_URL_TEMPLATE.format(item_number=item_number))
@@ -216,6 +321,11 @@ class NorcoScraper(BaseScraper):
             status, eta_date = _status_and_eta(row)
             size = row.get(size_col) if size_col else None
             color = row.get(color_col) if color_col else None
+            quantity = (
+                (row.get("qty_availh") or 0)
+                + (row.get("qty_availnh") or 0)
+                + (row.get("qty_availnh_2") or 0)
+            )
             items.append(
                 StockItem(
                     brand=self.brand_config.name,
@@ -225,6 +335,7 @@ class NorcoScraper(BaseScraper):
                     size=size,
                     color=color,
                     status=status,
+                    quantity=quantity,
                     regular_retail_price=row.get("msrp"),
                     eta_date=eta_date,
                     raw_status_text=(

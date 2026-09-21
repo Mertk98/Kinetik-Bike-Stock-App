@@ -7,10 +7,12 @@ from playwright.sync_api import sync_playwright
 
 from kinetik_stock.browser import launch_chromium
 from kinetik_stock.config import BrandConfig
-from kinetik_stock.models import StockStatus
+from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.norco import (
     NorcoScraper,
     _find_col_key,
+    _load_norco_items,
+    _report_status_and_eta,
     _status_and_eta,
 )
 
@@ -203,3 +205,122 @@ def test_extract_stock_items_handles_real_sold_out_page():
 
     assert len(items) == 2
     assert all(item.status == StockStatus.OUT_OF_STOCK for item in items)
+
+
+def test_load_norco_items(tmp_path):
+    csv_path = tmp_path / "norco_items.csv"
+    csv_path.write_text(
+        "System ID,Manufact. SKU,Item\n"
+        "210000041889,623014114,Norco Sight A1 MX Silver/Green SZ1 (29/27.5)\n"
+        "210000041890,,Norco Sight A1 MX Silver/Green SZ2 (29/27.5)\n"
+    )
+    rows = _load_norco_items(csv_path)
+    assert rows == [
+        {
+            "system_id": "210000041889",
+            "item_number": "623014114",
+            "item_text": "Norco Sight A1 MX Silver/Green SZ1 (29/27.5)",
+        },
+        {
+            "system_id": "210000041890",
+            "item_number": "",
+            "item_text": "Norco Sight A1 MX Silver/Green SZ2 (29/27.5)",
+        },
+    ]
+
+
+def _make_item(status, quantity=None, eta_date=None) -> StockItem:
+    return StockItem(
+        brand="Norco",
+        sku="0000000000",
+        product_title="Test Bike",
+        status=status,
+        quantity=quantity,
+        eta_date=eta_date,
+    )
+
+
+def test_report_status_and_eta_in_stock():
+    item = _make_item(StockStatus.IN_STOCK, quantity=15)
+    assert _report_status_and_eta(item) == ("Available (15)", "Now")
+
+
+def test_report_status_and_eta_pre_order():
+    item = _make_item(StockStatus.PRE_ORDER, quantity=0, eta_date="2027-02-15")
+    assert _report_status_and_eta(item) == ("pre-order", "2027-02-15")
+
+
+def test_report_status_and_eta_discontinued():
+    item = _make_item(StockStatus.DISCONTINUED, quantity=0)
+    assert _report_status_and_eta(item) == ("Discontinued", "N/A")
+
+
+def test_report_status_and_eta_out_of_stock():
+    item = _make_item(StockStatus.OUT_OF_STOCK, quantity=0)
+    assert _report_status_and_eta(item) == ("Out of Stock", "N/A")
+
+
+def test_generate_availability_report(tmp_path, monkeypatch):
+    csv_path = tmp_path / "norco_items.csv"
+    csv_path.write_text(
+        "System ID,Manufact. SKU,Item\n"
+        "1,IN-STOCK-ITEM,In Stock Bike SZ1\n"
+        "2,,No Sku On File SZ2\n"
+        "3,NOT-FOUND-ITEM,Not Found Bike SZ3\n"
+        "4,PRE-ORDER-ITEM,Pre Order Bike SZ4\n"
+    )
+
+    def fake_scrape_item_page(self, item_number):
+        if item_number == "IN-STOCK-ITEM":
+            return [
+                StockItem(
+                    brand="Norco",
+                    sku="IN-STOCK-ITEM",
+                    product_title="In Stock Bike",
+                    status=StockStatus.IN_STOCK,
+                    quantity=7,
+                )
+            ]
+        if item_number == "NOT-FOUND-ITEM":
+            return []
+        if item_number == "PRE-ORDER-ITEM":
+            return [
+                StockItem(
+                    brand="Norco",
+                    sku="PRE-ORDER-ITEM",
+                    product_title="Pre Order Bike",
+                    status=StockStatus.PRE_ORDER,
+                    quantity=0,
+                    eta_date="2027-03-01",
+                )
+            ]
+        raise AssertionError(f"unexpected item_number {item_number!r}")
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = NorcoScraper(brand_config, browser)
+            monkeypatch.setattr(
+                NorcoScraper, "_scrape_item_page", fake_scrape_item_page
+            )
+            try:
+                rows = scraper.generate_availability_report(csv_path)
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    by_system_id = {row["System ID"]: row for row in rows}
+
+    assert by_system_id["1"]["Status"] == "Available (7)"
+    assert by_system_id["1"]["ETA"] == "Now"
+
+    assert by_system_id["2"]["Status"] == "N/A"
+    assert by_system_id["2"]["ETA"] == "N/A"
+
+    assert by_system_id["3"]["Status"] == "N/A"
+    assert by_system_id["3"]["ETA"] == "N/A"
+
+    assert by_system_id["4"]["Status"] == "pre-order"
+    assert by_system_id["4"]["ETA"] == "2027-03-01"

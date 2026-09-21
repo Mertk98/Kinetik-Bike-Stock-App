@@ -47,11 +47,12 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled: fetch_stock() works against a confirmed real product page, but
-  # depends on config/norco_items.csv (one item/part number per bike model)
-  # which is still empty - LTP's own nav/search can't reliably build that
-  # model list for us, so the user maintains it by hand. Flip to enabled
-  # once that CSV has rows and a live login is confirmed.
+  # Disabled: fetch_stock() and generate_availability_report() (see
+  # norco_report.py) both work against confirmed real product-page data,
+  # and config/norco_items.csv now has the user's real item list - but the
+  # search -> product-page navigation is still unverified against a live
+  # login (see NorcoScraper's docstring). Flip to enabled once that's
+  # confirmed live.
   - key: norco
     name: "Norco"
     portal_url: "https://ltpdealer.com/"
