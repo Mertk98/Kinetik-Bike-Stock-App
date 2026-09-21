@@ -22,7 +22,9 @@ PASSWORD_SELECTOR = "#P1_CPWRD"
 LOGIN_BUTTON_SELECTOR = "#login"
 
 # Confirmed against the real post-login home page: the account menu has a
-# "Log Out" link at this exact href.
+# "Log Out" link at this exact href. Confirmed live: it sits inside a "My
+# Account" dropdown that's hidden until hovered/clicked, so login() checks
+# it's attached to the DOM rather than requiring it to be visible.
 LOGGED_IN_SELECTOR = "a[href='/logout.sa']"
 # The page never reaches Playwright's "networkidle" state - it loads Zendesk
 # chat, Klaviyo tracking, and Google Analytics, which keep making background
@@ -199,7 +201,7 @@ class NorcoScraper(BaseScraper):
 
         try:
             self.page.wait_for_selector(
-                LOGGED_IN_SELECTOR, state="visible", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
+                LOGGED_IN_SELECTOR, state="attached", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
             )
         except Exception:
             raise RuntimeError(
