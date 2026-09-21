@@ -24,7 +24,11 @@ LOGIN_BUTTON_SELECTOR = "#login"
 # Confirmed against the real post-login home page: the account menu has a
 # "Log Out" link at this exact href.
 LOGGED_IN_SELECTOR = "a[href='/logout.sa']"
-LOGGED_IN_CHECK_TIMEOUT_MS = 10000
+# The page never reaches Playwright's "networkidle" state - it loads Zendesk
+# chat, Klaviyo tracking, and Google Analytics, which keep making background
+# requests indefinitely - so login() waits directly for the logged-in
+# selector instead of network idle first.
+LOGGED_IN_CHECK_TIMEOUT_MS = 15000
 
 # LTP's own search is unreliable by bike name (confirmed by the user), but
 # searching by an exact item/part number always resolves to exactly one
@@ -192,7 +196,6 @@ class NorcoScraper(BaseScraper):
         self.page.fill(USERNAME_SELECTOR, self.brand_config.username or "")
         self.page.fill(PASSWORD_SELECTOR, self.brand_config.password or "")
         self.page.click(LOGIN_BUTTON_SELECTOR)
-        self.page.wait_for_load_state("networkidle")
 
         try:
             self.page.wait_for_selector(
