@@ -207,13 +207,19 @@ class NorcoScraper(BaseScraper):
 
     def fetch_stock(self) -> list[StockItem]:
         items: list[StockItem] = []
-        for row in _load_norco_items():
+        for row in _load_norco_items(NORCO_ITEMS_CSV):
             item_number = row["item_number"]
             if not item_number:
-                logger.warning(
-                    "No Manufact. SKU on file for %r (System ID %s) - skipping.",
-                    row["item_text"],
-                    row["system_id"],
+                # No Manufact. SKU on file means LTP has nothing to search for
+                # this SKU - the user treats that as discontinued rather than
+                # leaving it unresolved.
+                items.append(
+                    StockItem(
+                        brand=self.brand_config.name,
+                        sku="",
+                        product_title=row["item_text"],
+                        status=StockStatus.DISCONTINUED,
+                    )
                 )
                 continue
             page_items = self._scrape_item_page(item_number)
@@ -245,11 +251,9 @@ class NorcoScraper(BaseScraper):
             status_text, eta_text = "N/A", "N/A"
 
             if not item_number:
-                logger.warning(
-                    "No Manufact. SKU on file for %r (System ID %s) - can't look up.",
-                    item_text,
-                    system_id,
-                )
+                # No Manufact. SKU on file means LTP has nothing to search
+                # for - the user treats that as discontinued.
+                status_text, eta_text = "Discontinued", "N/A"
             else:
                 try:
                     page_items = self._scrape_item_page(item_number)

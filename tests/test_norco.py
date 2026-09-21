@@ -316,7 +316,8 @@ def test_generate_availability_report(tmp_path, monkeypatch):
     assert by_system_id["1"]["Status"] == "Available (7)"
     assert by_system_id["1"]["ETA"] == "Now"
 
-    assert by_system_id["2"]["Status"] == "N/A"
+    # No Manufact. SKU on file is treated as discontinued.
+    assert by_system_id["2"]["Status"] == "Discontinued"
     assert by_system_id["2"]["ETA"] == "N/A"
 
     assert by_system_id["3"]["Status"] == "N/A"
@@ -324,3 +325,49 @@ def test_generate_availability_report(tmp_path, monkeypatch):
 
     assert by_system_id["4"]["Status"] == "pre-order"
     assert by_system_id["4"]["ETA"] == "2027-03-01"
+
+
+def test_fetch_stock_treats_missing_item_number_as_discontinued(tmp_path, monkeypatch):
+    csv_path = tmp_path / "norco_items.csv"
+    csv_path.write_text(
+        "System ID,Manufact. SKU,Item\n"
+        "1,,No Sku On File SZ2\n"
+        "2,IN-STOCK-ITEM,In Stock Bike SZ1\n"
+    )
+
+    def fake_scrape_item_page(self, item_number):
+        assert item_number == "IN-STOCK-ITEM"
+        return [
+            StockItem(
+                brand="Norco",
+                sku="IN-STOCK-ITEM",
+                product_title="In Stock Bike",
+                status=StockStatus.IN_STOCK,
+                quantity=7,
+            )
+        ]
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = NorcoScraper(brand_config, browser)
+            monkeypatch.setattr(
+                "kinetik_stock.scrapers.norco.NORCO_ITEMS_CSV", csv_path
+            )
+            monkeypatch.setattr(
+                NorcoScraper, "_scrape_item_page", fake_scrape_item_page
+            )
+            try:
+                items = scraper.fetch_stock()
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    assert len(items) == 2
+    no_sku_item = next(i for i in items if i.product_title == "No Sku On File SZ2")
+    assert no_sku_item.status == StockStatus.DISCONTINUED
+
+    in_stock_item = next(i for i in items if i.sku == "IN-STOCK-ITEM")
+    assert in_stock_item.status == StockStatus.IN_STOCK
