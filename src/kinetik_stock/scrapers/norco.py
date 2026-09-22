@@ -34,16 +34,17 @@ LOGGED_IN_CHECK_TIMEOUT_MS = 15000
 
 # LTP's own search is unreliable by bike name (confirmed by the user), but
 # searching by an exact item/part number always resolves to exactly one
-# match. Confirmed against a real search: /ld/itemsearch?q=<item_number>
-# itself only returns a search-results shell (a Solr JSON blob with that
-# one item's summary, no size/color table) - the rich product page (with
-# the full columnsjsondata table below) is reached by the site's own JS
-# auto-navigating there for a single-match search. UNVERIFIED: that
-# auto-navigation itself (inferred from the search-results HTML plus a
-# separately-provided product page for the same item, not observed
-# end-to-end) - _scrape_item_page() waits for columnsjsondata to appear on
-# whatever page we land on, and fails loudly if it never does.
+# match. Confirmed live: /ld/itemsearch?q=<item_number> itself only renders
+# a search-results shell (a Solr-backed grid, no size/color table) - there's
+# no auto-navigation to the real product page. Each result card in #products
+# renders two <a href="/ld/padetail/<group_id>"> links (one around the
+# thumbnail, one around the title) that both go to the actual product page
+# with the columnsjsondata table; there's also a separate "Quick Add"
+# <button> (not a link) that opens an inline popup instead - that one must
+# NOT be clicked, since it never reaches the product page.
 ITEM_SEARCH_URL_TEMPLATE = "https://ltpdealer.com/ld/itemsearch?q={item_number}"
+SEARCH_RESULT_LINK_SELECTOR = "#products a[href^='/ld/padetail/']"
+SEARCH_RESULT_CLICK_TIMEOUT_MS = 15000
 PRODUCT_PAGE_LOAD_TIMEOUT_MS = 15000
 
 # config/norco_items.csv is the user's own inventory export, not something
@@ -169,11 +170,13 @@ class NorcoScraper(BaseScraper):
     operated by distributor Live to Play Sports (LTP Dealer).
 
     Unlike Transition Bikes, this portal has no single stock-list page.
-    Instead, searching by an exact item/part number lands directly on that
-    item's product page, which embeds a JS variable (`columnsjsondata`)
-    listing every size/color variant of that model with its own item
-    number, price, and per-warehouse quantity - confirmed against a real
-    product page (Sight C1 160).
+    Instead, searching by an exact item/part number returns a results grid
+    with exactly one card; clicking it (confirmed live - see the comment
+    above ITEM_SEARCH_URL_TEMPLATE) lands on that item's product page, which
+    embeds a JS variable (`columnsjsondata`) listing every size/color
+    variant of that model with its own item number, price, and per-
+    warehouse quantity - confirmed against a real product page (Sight C1
+    160).
 
     config/norco_items.csv is the user's own inventory export (System ID,
     Manufact. SKU, Item) - one row per exact SKU they carry, not one per
@@ -185,11 +188,8 @@ class NorcoScraper(BaseScraper):
     "Discontinued"/"N/A", "Out of Stock"/"N/A") - including rows with no
     Manufact. SKU on file, which can't be looked up at all.
 
-    Unverified: whether a single-match item-number search really does
-    auto-navigate client-side from the search-results shell to this product
-    page (inferred, not observed end-to-end - see the comment above
-    ITEM_SEARCH_URL_TEMPLATE) and whether there's a "low stock" distinction
-    at all - see _status_and_eta().
+    Unverified: whether there's a "low stock" distinction at all - see
+    _status_and_eta().
     """
 
     def login(self) -> None:
@@ -294,14 +294,27 @@ class NorcoScraper(BaseScraper):
     def _scrape_item_page(self, item_number: str) -> list[StockItem]:
         self.page.goto(ITEM_SEARCH_URL_TEMPLATE.format(item_number=item_number))
         try:
+            # .first because each result card has two matching links (image
+            # + title) - Playwright's strict mode would otherwise reject the
+            # ambiguous selector.
+            self.page.locator(SEARCH_RESULT_LINK_SELECTOR).first.click(
+                timeout=SEARCH_RESULT_CLICK_TIMEOUT_MS
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Search for item {item_number!r} returned no clickable result "
+                f"(stuck at {self.page.url}) - confirm it's a valid item number."
+            ) from exc
+
+        try:
             self.page.wait_for_function(
                 "typeof columnsjsondata !== 'undefined'",
                 timeout=PRODUCT_PAGE_LOAD_TIMEOUT_MS,
             )
         except Exception as exc:
             raise RuntimeError(
-                f"Searching for item {item_number!r} never reached a product page "
-                f"(stuck at {self.page.url}) - confirm it's a valid item number."
+                f"Clicking the search result for item {item_number!r} didn't reach "
+                f"a product page (stuck at {self.page.url})."
             ) from exc
         return self._extract_stock_items_from_current_page()
 
