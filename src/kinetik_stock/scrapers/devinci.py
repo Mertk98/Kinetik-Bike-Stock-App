@@ -197,16 +197,36 @@ class DevinciScraper(BaseScraper):
     row by the user - see the module-level comments above for exactly
     what's confirmed.
 
+    Confirmed real portal domain: transac.devinci.com (previously a
+    placeholder). This sandbox's network policy blocks outbound access to
+    that host entirely (403 at the proxy, not the site), so nothing below
+    could be verified live from here - it's recorded from URLs the user
+    shared, not from fetching them.
+
+    Confirmed there's more than one order type reachable this way, each
+    with its own Type= GUID in the Achats_Treeview.aspx URL:
+      - "In Season": Type=D17A9733897C4B088F16E046997B00B6 (the one
+        fetch_stock()'s row/cell parsing below is confirmed against).
+      - "Closeout": Type=78A8E3551F714CD1A68AF58EDAA50E8C - HTML for this
+        one hasn't been captured yet, so it's NOT confirmed that the same
+        grid structure (RadGrid1, the 5-size x 2-period cell layout, etc.)
+        applies unchanged - a closeout/clearance page could plausibly have
+        just one period, or a different layout entirely.
+
     UNVERIFIED and NOT implemented:
       - login(): no login page HTML has been captured yet, so there are no
         confirmed selectors for the username/password fields, the submit
         control, or a "logged in" check.
-      - The navigation path from the post-login landing page to the order
+      - The navigation path from the post-login landing page to an order
         grid: the grid's own URL (Achats_Treeview.aspx?no=<order id>&Type=
-        <order type guid>) has session-specific query params that appear to
-        get generated when a dealer starts/opens an order in the portal UI
-        (e.g. picking "In Season" from a menu) - there's no evidence it's a
-        fixed URL that can just be navigated to directly after login.
+        <order type guid>) has session-specific query params that get
+        generated per order instance, not a fixed URL reachable right
+        after login - confirmed by 3 different real no= values seen across
+        separate sessions/order types. There's also a Menu.aspx?no=<order
+        id> page that the user's "In Season" link stopped at rather than
+        reaching Achats_Treeview.aspx directly (unlike their "Closeout"
+        link) - whether that's a required intermediate step or just where
+        they happened to copy the URL from is unconfirmed.
 
     Keep `enabled: false` in config/brands.yaml until both of the above are
     confirmed against the real portal.
