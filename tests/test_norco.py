@@ -241,8 +241,18 @@ def _make_item(status, quantity=None, eta_date=None) -> StockItem:
 
 
 def test_report_status_and_eta_in_stock():
+    item = _make_item(StockStatus.IN_STOCK, quantity=7)
+    assert _report_status_and_eta(item) == ("Available (7)", "Now")
+
+
+def test_report_status_and_eta_in_stock_at_ten_shows_exact_number():
+    item = _make_item(StockStatus.IN_STOCK, quantity=10)
+    assert _report_status_and_eta(item) == ("Available (10)", "Now")
+
+
+def test_report_status_and_eta_in_stock_above_ten_shows_plus():
     item = _make_item(StockStatus.IN_STOCK, quantity=15)
-    assert _report_status_and_eta(item) == ("Available (15)", "Now")
+    assert _report_status_and_eta(item) == ("Available (10+)", "Now")
 
 
 def test_report_status_and_eta_pre_order():

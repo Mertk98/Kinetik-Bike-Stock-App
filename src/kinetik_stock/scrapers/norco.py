@@ -123,13 +123,22 @@ def _status_and_eta(row: dict) -> tuple[StockStatus, Optional[str]]:
     return StockStatus.OUT_OF_STOCK, None
 
 
+def _format_quantity_display(quantity: int) -> str:
+    # Confirmed against a real product page (Sight C2 150): the portal's own
+    # per-warehouse display caps at "10+" once a warehouse's on-hand count
+    # exceeds 10 (qty_availh=10 renders "10", qty_availh=11 renders "10+").
+    # The report sums both warehouses first (per the user), then applies the
+    # same "10+" cap to that summed total rather than showing the exact count.
+    return "10+" if quantity > 10 else str(quantity)
+
+
 def _report_status_and_eta(item: StockItem) -> tuple[str, str]:
     """Formats a scraped StockItem into the specific wording the user's own
     LTP/Norco report expects, distinct from the generic StockStatus values
     used in the shared multi-brand CSV (models.py's as_csv_row()).
     """
     if item.status == StockStatus.IN_STOCK:
-        return f"Available ({item.quantity})", "Now"
+        return f"Available ({_format_quantity_display(item.quantity)})", "Now"
     if item.status == StockStatus.PRE_ORDER:
         return "pre-order", item.eta_date or "N/A"
     if item.status == StockStatus.DISCONTINUED:
