@@ -207,6 +207,67 @@ def test_extract_stock_items_treats_coincident_periods_as_in_stock(tmp_path):
     assert by_size["XS"].status == StockStatus.OUT_OF_STOCK
 
 
+def test_extract_stock_items_from_page_matches_closeout_description_markup(tmp_path):
+    # Confirmed against a real Closeout grid page pasted from a live
+    # session: unlike In Season's disabled "aspNetDisabled
+    # DescriptionSansLien" anchor, Closeout's description is a real,
+    # clickable link with class "Description" instead - only the shared
+    # "_MyHyperlink" id suffix is common to both, which is what
+    # _extract_stock_items_from_page() now matches on. Also confirms the
+    # field-name pattern's order-type code (LIQU here, vs GAMM on In
+    # Season) and the onchange's order-type token (LIQUID vs REPEAT)
+    # don't affect parsing - same synthetic-minimal-page approach as
+    # test_extract_stock_items_treats_coincident_periods_as_in_stock.
+    page_path = tmp_path / "closeout_description_markup.html"
+    page_path.write_text(
+        """
+        <html><head><meta charset="utf-8"></head><body><form>
+        <input type="hidden" name="txtDateDébutLivraison1" value="2026-08-01">
+        <input type="hidden" name="txtDateDébutLivraison2" value="2026-08-16">
+        <table id="RadGrid1_ctl00"><tbody>
+        <tr class="rgRow" id="RadGrid1_ctl00__0">
+        <td class="rgGroupCol">&nbsp;</td>
+        <td class="ItemStyle">FC22044-01</td>
+        <td class="ItemStyle"><a id="RadGrid1_ctl00_ctl12_MyHyperlink" class="Description" href="http://www.devinci.com/bikes/item_FC220440" target="_blank">Frameset Spartan Carbon - Blue Secret</a></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtprice6_FC22044_01__LIQU_2022_1" value="4389"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtXS1_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtS1_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtM1_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtL1_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtXL1_FC22044_01__LIQU_2022_1" onchange="ValiderQty(this.value,1,'1',this,'LIQUID','1')"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtXS2_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtS2_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtM2_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtL2_FC22044_01__LIQU_2022_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl12$txtXL2_FC22044_01__LIQU_2022_1" onchange="ValiderQty(this.value,1,'1',this,'LIQUID','2')"></td>
+        </tr>
+        </tbody></table>
+        </form></body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(page_path.resolve().as_uri())
+                items = scraper._extract_stock_items_from_page()
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    by_size = {i.size: i for i in items}
+    assert all(i.product_title == "Frameset Spartan Carbon" for i in items)
+    assert all(i.color == "Blue Secret" for i in items)
+    xl = by_size["XL"]
+    assert (xl.status, xl.quantity, xl.eta_date) == (StockStatus.IN_STOCK, 1, None)
+    assert by_size["XS"].status == StockStatus.OUT_OF_STOCK
+
+
 def test_load_devinci_items(tmp_path):
     csv_path = tmp_path / "devinci_items.csv"
     csv_path.write_text(

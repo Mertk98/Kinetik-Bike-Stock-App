@@ -19,9 +19,13 @@ logger = logging.getLogger(__name__)
 # and each of the 5 sizes (XS/S/M/L/XL) is its own quantity <input> cell, x2
 # "periods" (delivery windows) side by side. Confirmed field-name pattern
 # for each cell, e.g. "RadGrid1$ctl00$ctl10$txtM1_FE26100_11__GAMM_2027_1":
-# always "tx t<SIZE><PERIOD>_<SKU with '-' replaced by '_'>__GAMM_2027_<n>".
-# The "ctlNN" segment is a per-row ASP.NET control index with no fixed
-# value, so cells are matched by this field-name pattern, not position.
+# always "txt<SIZE><PERIOD>_<SKU with '-' replaced by '_'>__<n>", where <n>
+# is an order-type/model-year code that varies (confirmed "GAMM_2027" on
+# In Season, "LIQU_2025"/"LIQU_2026"/etc. on Closeout - a real Closeout
+# grid capture confirms this whole cell/field-name pattern is identical
+# across order types, just with a different code here). The "ctlNN" segment
+# is a per-row ASP.NET control index with no fixed value, so cells are
+# matched by this field-name pattern, not position.
 QTY_FIELD_RE = re.compile(r"\$txt(?P<size>XS|XL|S|M|L)(?P<period>[12])_")
 
 # Confirmed: an orderable cell's onchange carries the *actual* max orderable
@@ -215,13 +219,21 @@ class DevinciScraper(BaseScraper):
 
     Confirmed there's more than one order type reachable this way, each
     with its own Type= GUID in the Achats_Treeview.aspx URL:
-      - "In Season": Type=D17A9733897C4B088F16E046997B00B6 (the one
-        fetch_stock()'s row/cell parsing below is confirmed against).
-      - "Closeout": Type=78A8E3551F714CD1A68AF58EDAA50E8C - HTML for this
-        one hasn't been captured yet, so it's NOT confirmed that the same
-        grid structure (RadGrid1, the 5-size x 2-period cell layout, etc.)
-        applies unchanged - a closeout/clearance page could plausibly have
-        just one period, or a different layout entirely.
+      - "In Season": Type=D17A9733897C4B088F16E046997B00B6.
+      - "Closeout": Type=78A8E3551F714CD1A68AF58EDAA50E8C.
+    A real Closeout grid page has now also been captured (pasted from a
+    live session), confirming fetch_stock()'s row/cell parsing below works
+    unchanged across both order types: same RadGrid1 layout (5 sizes x 2
+    periods), same disabled/gray-cell and "10+"-cap semantics, same
+    txt<SIZE><PERIOD>_<SKU>__<code> field-name pattern (just a different
+    <code> - LIQU on Closeout vs GAMM on In Season) and the same onchange=
+    "ValiderQty(...)" real-quantity convention (order-type token in that
+    call differs too - LIQUID vs REPEAT - but parsing doesn't depend on
+    it). One real difference this capture surfaced and fixed: the
+    description <a>'s class differs (In Season: "aspNetDisabled
+    DescriptionSansLien", not clickable; Closeout: "Description", a real
+    product-page link) - both share the id suffix "_MyHyperlink", which is
+    what description_el is now matched on below instead of a class name.
 
     UNVERIFIED and NOT implemented:
       - login(): no login page HTML has been captured yet, so there are no
@@ -231,7 +243,7 @@ class DevinciScraper(BaseScraper):
         grid: the grid's own URL (Achats_Treeview.aspx?no=<order id>&Type=
         <order type guid>) has session-specific query params that get
         generated per order instance, not a fixed URL reachable right
-        after login - confirmed by 3 different real no= values seen across
+        after login - confirmed by 4 different real no= values seen across
         separate sessions/order types. There's also a Menu.aspx?no=<order
         id> page that the user's "In Season" link stopped at rather than
         reaching Achats_Treeview.aspx directly (unlike their "Closeout"
@@ -294,7 +306,7 @@ class DevinciScraper(BaseScraper):
                 continue  # not a product row (shouldn't happen for rgRow/rgAltRow)
 
             sku = cells[1].inner_text().strip()
-            description_el = row.query_selector("a.DescriptionSansLien")
+            description_el = row.query_selector("a[id$='_MyHyperlink']")
             description = description_el.inner_text().strip() if description_el else ""
             product_title, color = split_description(description)
 
