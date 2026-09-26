@@ -41,7 +41,16 @@ def test_split_description():
         "Bike Wilson 40 | GX DH",
         "Sepia Green",
     )
+    # Frameset-only SKUs use " - " instead of "|", confirmed against a real
+    # portal capture (e.g. "Frameset Spartan - Greige").
+    assert split_description("Frameset Spartan - Greige") == (
+        "Frameset Spartan",
+        "Greige",
+    )
+    # No delimiter at all -> can't tell a color from a trailing spec token,
+    # so this stays unsplit (confirmed real examples: "Bike Milano 2 AL13").
     assert split_description("No pipes here") == ("No pipes here", None)
+    assert split_description("Bike Milano 2 AL13") == ("Bike Milano 2 AL13", None)
 
 
 def test_login_is_unverified():

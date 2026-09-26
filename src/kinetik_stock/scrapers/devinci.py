@@ -62,14 +62,24 @@ PERIOD_2_START_DATE_FIELD = "txtDateDébutLivraison2"
 
 SIZE_ORDER = ["XS", "S", "M", "L", "XL"]
 
-# Confirmed: description text is consistently "<model/build> | <component
-# spec> | <color>", e.g. "Bike Wilson 40 | GX DH | Sepia Green" - the last
-# '|'-segment is always the color across every row seen.
+# Confirmed against a fuller real capture (84 SKUs / 420 size-rows, not just
+# the 4-SKU trimmed fixture) that "<model/build> | <component spec> |
+# <color>" (e.g. "Bike Wilson 40 | GX DH | Sepia Green") is NOT universal:
+#   - Frameset-only SKUs use " - " instead, e.g. "Frameset Spartan - Greige"
+#     - still an unambiguous last-segment-is-color split, just a different
+#     separator.
+#   - Some SKUs (e.g. "Bike Milano 2 AL13", "Bike Ewoc 20" 7s Matcha") have
+#     no delimiter at all, so there's no reliable way to tell a color from a
+#     trailing spec/size token - these fall through to (description, None),
+#     same as always.
 def split_description(description: str) -> tuple[str, Optional[str]]:
-    parts = [p.strip() for p in description.split("|")]
-    if len(parts) < 2:
-        return description.strip(), None
-    return " | ".join(parts[:-1]), parts[-1]
+    if "|" in description:
+        parts = [p.strip() for p in description.split("|")]
+        return " | ".join(parts[:-1]), parts[-1]
+    if " - " in description:
+        title, _, color = description.rpartition(" - ")
+        return title.strip(), color.strip()
+    return description.strip(), None
 
 
 # config/devinci_items.csv is the user's own inventory export (same idea as
