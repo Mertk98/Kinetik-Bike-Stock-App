@@ -135,3 +135,58 @@ def test_extract_stock_items_from_page_matches_real_grid_structure():
 
     xs = by_sku_size[("FV27105-32", "XS")]
     assert (xs.status, xs.quantity, xs.eta_date) == (StockStatus.OUT_OF_STOCK, 0, None)
+
+
+def test_extract_stock_items_treats_coincident_periods_as_in_stock(tmp_path):
+    # Per the user: period 2's start date isn't always later than period
+    # 1's - when they coincide, period 2 isn't really "future production"
+    # at all, so a quantity there is IN_STOCK, not PRE_ORDER, with no ETA.
+    # This is a synthetic minimal page (not a full real fixture) built from
+    # the same confirmed field-name/attribute patterns as achats_treeview.html,
+    # just with both periods' start dates set equal.
+    page_path = tmp_path / "coincident_periods.html"
+    page_path.write_text(
+        """
+        <html><head><meta charset="utf-8"></head><body><form>
+        <input type="hidden" name="txtDateDébutLivraison1" value="2026-08-01">
+        <input type="hidden" name="txtDateDébutLivraison2" value="2026-08-01">
+        <table id="RadGrid1_ctl00"><tbody>
+        <tr class="rgRow" id="RadGrid1_ctl00__0">
+        <td class="rgGroupCol">&nbsp;</td>
+        <td class="ItemStyle">FV00000-00</td>
+        <td class="ItemStyle"><a class="DescriptionSansLien">Bike Test | Spec | Black</a></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtprice6_FV00000_00__GAMM_2027_1" value="1999"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtXS1_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtS1_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtM1_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtL1_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtXL1_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtXS2_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtS2_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtM2_FV00000_00__GAMM_2027_1" onchange="ValiderQty(this.value,7,'1',this,'REPEAT','2')"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtL2_FV00000_00__GAMM_2027_1"></td>
+        <td><input type="text" name="RadGrid1$ctl00$ctl00$txtXL2_FV00000_00__GAMM_2027_1"></td>
+        </tr>
+        </tbody></table>
+        </form></body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(page_path.resolve().as_uri())
+                items = scraper._extract_stock_items_from_page()
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    by_size = {i.size: i for i in items}
+    m = by_size["M"]
+    assert (m.status, m.quantity, m.eta_date) == (StockStatus.IN_STOCK, 7, None)
+    assert by_size["XS"].status == StockStatus.OUT_OF_STOCK

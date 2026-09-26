@@ -49,6 +49,12 @@ ROW_SELECTOR = "tr.rgRow, tr.rgAltRow"
 # PRE_ORDER if period 2 has any quantity (ETA = period 2's start date);
 # otherwise OUT_OF_STOCK (no current or future availability at all) - this
 # covers both "sold out" and "this size isn't offered for this model".
+#
+# Per the user: the two periods' start dates can coincide (period 2 isn't
+# always later than period 1) - when they do, period 2 isn't really
+# "future" at all, so any quantity there counts as IN_STOCK too, not
+# PRE_ORDER, and gets no ETA.
+PERIOD_1_START_DATE_FIELD = "txtDateDébutLivraison1"
 PERIOD_2_START_DATE_FIELD = "txtDateDébutLivraison2"
 
 SIZE_ORDER = ["XS", "S", "M", "L", "XL"]
@@ -108,7 +114,10 @@ class DevinciScraper(BaseScraper):
 
     def _extract_stock_items_from_page(self) -> list[StockItem]:
         source_url = self.page.url
-        period_2_eta = self._hidden_field_value(PERIOD_2_START_DATE_FIELD)
+        period_1_start = self._hidden_field_value(PERIOD_1_START_DATE_FIELD)
+        period_2_start = self._hidden_field_value(PERIOD_2_START_DATE_FIELD)
+        # If the periods share a start date, period 2 isn't a future window.
+        periods_coincide = period_1_start is not None and period_1_start == period_2_start
 
         items: list[StockItem] = []
         for row in self.page.query_selector_all(ROW_SELECTOR):
@@ -151,7 +160,14 @@ class DevinciScraper(BaseScraper):
                 if now_qty > 0:
                     status, quantity, eta_date = StockStatus.IN_STOCK, now_qty, None
                 elif future_qty > 0:
-                    status, quantity, eta_date = StockStatus.PRE_ORDER, future_qty, period_2_eta
+                    if periods_coincide:
+                        status, quantity, eta_date = StockStatus.IN_STOCK, future_qty, None
+                    else:
+                        status, quantity, eta_date = (
+                            StockStatus.PRE_ORDER,
+                            future_qty,
+                            period_2_start,
+                        )
                 else:
                     status, quantity, eta_date = StockStatus.OUT_OF_STOCK, 0, None
 
