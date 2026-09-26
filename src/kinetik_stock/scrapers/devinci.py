@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import csv
 import logging
 import re
+from pathlib import Path
 from typing import Optional
 
+from kinetik_stock.config import REPO_ROOT
 from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.base import BaseScraper
 
@@ -69,6 +72,121 @@ def split_description(description: str) -> tuple[str, Optional[str]]:
     return " | ".join(parts[:-1]), parts[-1]
 
 
+# config/devinci_items.csv is the user's own inventory export (same idea as
+# Norco's config/norco_items.csv), one row per Manufacturer SKU they carry -
+# not one row per size, since Devinci's own SKU already covers every size of
+# one model/color. generate_availability_report() expands each matched SKU
+# back out to one report row per size (the size is appended to the Item
+# Description, per the user), since a single SKU's 5 sizes can each have a
+# different status.
+DEVINCI_ITEMS_CSV = REPO_ROOT / "config" / "devinci_items.csv"
+DEVINCI_REPORT_FIELDNAMES = ["System ID", "Manufacturer SKU", "Item Description", "Status", "ETA"]
+
+
+def _load_devinci_items(path: Path = DEVINCI_ITEMS_CSV) -> list[dict]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found - add a CSV with 'System ID', 'Manufacturer SKU', "
+            "'Item Description' columns (the user's own inventory export)."
+        )
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = [
+            {
+                "system_id": row["System ID"].strip(),
+                "manufacturer_sku": (row.get("Manufacturer SKU") or "").strip(),
+                "item_description": row["Item Description"].strip(),
+            }
+            for row in csv.DictReader(f)
+        ]
+    if not rows:
+        raise ValueError(f"{path} has no rows.")
+    return rows
+
+
+def write_devinci_report_csv(rows: list[dict], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=DEVINCI_REPORT_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _report_status_and_eta(item: StockItem) -> tuple[str, str]:
+    """Formats a scraped StockItem into the same wording style as Norco's
+    own report (_report_status_and_eta in norco.py), for consistency across
+    the user's per-brand reports. Unlike Norco, Devinci's quantity is never
+    capped (onchange gives the real count, not a "10+" display value), so
+    the exact number is always shown.
+    """
+    if item.status == StockStatus.IN_STOCK:
+        return f"Available ({item.quantity})", "Now"
+    if item.status == StockStatus.PRE_ORDER:
+        return "pre-order", item.eta_date or "N/A"
+    return "Out of Stock", "N/A"
+
+
+def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[dict]:
+    """Pure function: matches each input row's Manufacturer SKU against
+    already-scraped StockItems and expands it to one report row per size.
+    Kept separate from generate_availability_report() so it's testable
+    without needing a working fetch_stock() (still unverified - see the
+    class docstring).
+    """
+    items_by_sku: dict[str, list[StockItem]] = {}
+    for item in items:
+        items_by_sku.setdefault(item.sku, []).append(item)
+
+    report_rows: list[dict] = []
+    for row in rows:
+        system_id = row["system_id"]
+        sku = row["manufacturer_sku"]
+        description = row["item_description"]
+
+        if not sku:
+            # No Manufacturer SKU on file - mirrors Norco's convention of
+            # treating that as discontinued rather than unresolved.
+            report_rows.append(
+                {
+                    "System ID": system_id,
+                    "Manufacturer SKU": sku,
+                    "Item Description": description,
+                    "Status": "Discontinued",
+                    "ETA": "N/A",
+                }
+            )
+            continue
+
+        matched = items_by_sku.get(sku)
+        if not matched:
+            logger.warning(
+                "SKU %s (%r) wasn't found in the scraped catalog.", sku, description
+            )
+            report_rows.append(
+                {
+                    "System ID": system_id,
+                    "Manufacturer SKU": sku,
+                    "Item Description": description,
+                    "Status": "N/A",
+                    "ETA": "N/A",
+                }
+            )
+            continue
+
+        for size_item in sorted(matched, key=lambda i: SIZE_ORDER.index(i.size)):
+            status_text, eta_text = _report_status_and_eta(size_item)
+            report_rows.append(
+                {
+                    "System ID": system_id,
+                    "Manufacturer SKU": sku,
+                    "Item Description": f"{description} - {size_item.size}",
+                    "Status": status_text,
+                    "ETA": eta_text,
+                }
+            )
+
+    return report_rows
+
+
 class DevinciScraper(BaseScraper):
     """Scraper for Devinci's B2B dealer portal ("SITE TRANSACTIONNEL").
 
@@ -92,6 +210,12 @@ class DevinciScraper(BaseScraper):
 
     Keep `enabled: false` in config/brands.yaml until both of the above are
     confirmed against the real portal.
+
+    generate_availability_report() reproduces the user's own report format
+    (System ID, Manufacturer SKU, Item Description, Status, ETA), like
+    NorcoScraper.generate_availability_report() - see build_availability_report()
+    above for the matching/expansion logic, which is independently testable
+    without a working fetch_stock().
     """
 
     def login(self) -> None:
@@ -111,6 +235,20 @@ class DevinciScraper(BaseScraper):
             "_extract_stock_items_from_page() below is confirmed against the "
             "real grid HTML once a page is already on it."
         )
+
+    def generate_availability_report(
+        self, input_csv: Path = DEVINCI_ITEMS_CSV
+    ) -> list[dict]:
+        """Produces the user's own report format: the input CSV's 3 columns
+        (System ID, Manufacturer SKU, Item Description) plus Status/ETA,
+        expanded to one row per size for each matched SKU. Depends on
+        fetch_stock(), so it can't run end-to-end until that's confirmed
+        (see the class docstring) - build_availability_report() has the
+        matching/expansion logic and is tested directly against fixture data.
+        """
+        items = self.fetch_stock()
+        rows = _load_devinci_items(input_csv)
+        return build_availability_report(items, rows)
 
     def _extract_stock_items_from_page(self) -> list[StockItem]:
         source_url = self.page.url
