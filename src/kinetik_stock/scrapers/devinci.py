@@ -29,27 +29,27 @@ QTY_FIELD_RE = re.compile(r"\$txt(?P<size>XS|XL|S|M|L)(?P<period>[12])_")
 # read from onchange, not the (possibly capped) label text.
 MAX_QTY_RE = re.compile(r"ValiderQty\(this\.value,\s*(\d+)")
 
-# Confirmed: a sold-out cell has disabled="disabled" and a black background
-# (RGB(0,0,0)); a cell for a size this model/color doesn't offer at all is
-# gray (RGB(180,180,180) or RGB(200,200,200) - just alternating-row styling,
-# not a distinct meaning) with neither onchange nor disabled - it's skipped
-# entirely rather than emitted as an out-of-stock StockItem, since the size
-# doesn't exist for this row at all.
-QTY_TABLE_SELECTOR = "table#RadGrid1_ctl00"
+# A cell has zero quantity for its period whenever it isn't a live,
+# orderable white cell with an onchange handler - whether that's a
+# disabled black "SOLD OUT" cell, or a gray cell with neither onchange nor
+# disabled at all. Confirmed these are NOT the same as "this size doesn't
+# exist for this model": on a real row (FV27105-32 "Bike Spartan | MX GX
+# AXS | Deep Olive"), M1/L1 are gray/zero (no stock *now*) while M2/L2 are
+# live orderable cells (15/12 units of *future production*) - so a gray
+# period-1 cell just means nothing in that period, not that the size is
+# unavailable altogether. Confirmed live: S1=9/XL1=5 (in stock now) and
+# M1=L1=0 with M2=15/L2=12 (future production only, no stock now).
 ROW_SELECTOR = "tr.rgRow, tr.rgAltRow"
 
 # Confirmed: period 1 is "In Stock Now" (hidden fields txtDateDébutLivraison1/
 # txtDateFinLivraison1), period 2 is "Future production" (txtDateDébut
 # Livraison2/txtDateFinLivraison2) - a later, separate delivery window.
-# Mapped here as: period 1 -> IN_STOCK/OUT_OF_STOCK (available now), period
-# 2 -> PRE_ORDER/OUT_OF_STOCK (bookable for that later window), using the
-# period's own start date as the ETA. This mapping is an interpretation of
-# what the two periods mean, not something the portal itself labels as
-# "pre-order" - unverified against dealer-facing terminology.
-PERIOD_START_DATE_FIELD = {
-    "1": "txtDateDébutLivraison1",
-    "2": "txtDateDébutLivraison2",
-}
+# Confirmed there are only 3 statuses (per the user, who has live access to
+# the portal): a size is IN_STOCK if period 1 has any quantity; otherwise
+# PRE_ORDER if period 2 has any quantity (ETA = period 2's start date);
+# otherwise OUT_OF_STOCK (no current or future availability at all) - this
+# covers both "sold out" and "this size isn't offered for this model".
+PERIOD_2_START_DATE_FIELD = "txtDateDébutLivraison2"
 
 SIZE_ORDER = ["XS", "S", "M", "L", "XL"]
 
@@ -68,8 +68,10 @@ class DevinciScraper(BaseScraper):
 
     fetch_stock()'s row/cell parsing (_extract_stock_items_from_page) is
     confirmed against a real order grid page (Achats_Treeview.aspx, "In
-    Season" order type) pasted from a live dealer session - see the module-
-    level comments above for exactly what's confirmed.
+    Season" order type) pasted from a live dealer session, including the
+    exact in-stock/pre-order/out-of-stock split confirmed against a live
+    row by the user - see the module-level comments above for exactly
+    what's confirmed.
 
     UNVERIFIED and NOT implemented:
       - login(): no login page HTML has been captured yet, so there are no
@@ -106,10 +108,7 @@ class DevinciScraper(BaseScraper):
 
     def _extract_stock_items_from_page(self) -> list[StockItem]:
         source_url = self.page.url
-        period_start_date = {
-            period: self._hidden_field_value(field_name)
-            for period, field_name in PERIOD_START_DATE_FIELD.items()
-        }
+        period_2_eta = self._hidden_field_value(PERIOD_2_START_DATE_FIELD)
 
         items: list[StockItem] = []
         for row in self.page.query_selector_all(ROW_SELECTOR):
@@ -124,6 +123,10 @@ class DevinciScraper(BaseScraper):
 
             retail_price = self._retail_price(row)
 
+            # One quantity per size per period, defaulting to 0 - a size
+            # always has all 10 (5 sizes x 2 periods) cells present in the
+            # real grid, whether or not they're orderable.
+            period_qty = {size: {"1": 0, "2": 0} for size in SIZE_ORDER}
             for qty_input in row.query_selector_all("input[type='text']"):
                 name = qty_input.get_attribute("name") or ""
                 match = QTY_FIELD_RE.search(name)
@@ -135,22 +138,22 @@ class DevinciScraper(BaseScraper):
                 disabled = qty_input.get_attribute("disabled") is not None
                 onchange = qty_input.get_attribute("onchange")
 
-                if not disabled and not onchange:
-                    continue  # size not offered for this model/color at all
+                if disabled or not onchange:
+                    continue  # zero for this period - stays at the 0 default
 
-                if disabled:
-                    status = StockStatus.OUT_OF_STOCK
-                    quantity = 0
-                    eta_date = None
+                qty_match = MAX_QTY_RE.search(onchange)
+                period_qty[size][period] = int(qty_match.group(1)) if qty_match else 0
+
+            for size in SIZE_ORDER:
+                now_qty = period_qty[size]["1"]
+                future_qty = period_qty[size]["2"]
+
+                if now_qty > 0:
+                    status, quantity, eta_date = StockStatus.IN_STOCK, now_qty, None
+                elif future_qty > 0:
+                    status, quantity, eta_date = StockStatus.PRE_ORDER, future_qty, period_2_eta
                 else:
-                    qty_match = MAX_QTY_RE.search(onchange or "")
-                    quantity = int(qty_match.group(1)) if qty_match else None
-                    if period == "1":
-                        status = StockStatus.IN_STOCK
-                        eta_date = None
-                    else:
-                        status = StockStatus.PRE_ORDER
-                        eta_date = period_start_date.get(period)
+                    status, quantity, eta_date = StockStatus.OUT_OF_STOCK, 0, None
 
                 items.append(
                     StockItem(
@@ -164,12 +167,12 @@ class DevinciScraper(BaseScraper):
                         quantity=quantity,
                         regular_retail_price=retail_price,
                         eta_date=eta_date,
-                        raw_status_text=f"period={period} disabled={disabled}",
+                        raw_status_text=f"in_stock_now={now_qty} future_production={future_qty}",
                         source_url=source_url,
                     )
                 )
 
-        items.sort(key=lambda i: (i.sku, SIZE_ORDER.index(i.size) if i.size in SIZE_ORDER else -1))
+        items.sort(key=lambda i: (i.sku, SIZE_ORDER.index(i.size)))
         return items
 
     def _retail_price(self, row) -> Optional[float]:

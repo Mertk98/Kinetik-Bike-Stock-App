@@ -83,45 +83,55 @@ def test_extract_stock_items_from_page_matches_real_grid_structure():
         finally:
             browser.close()
 
-    by_sku_size = {(i.sku, i.size, i.status): i for i in items}
+    by_sku_size = {(i.sku, i.size): i for i in items}
 
-    # FV27122-21: fully sold out in both periods -> 10 OUT_OF_STOCK rows
-    # (5 sizes x 2 periods), quantity 0, no ETA.
+    # Exactly one StockItem per (SKU, size) - one of only 3 statuses, never
+    # split by period.
+    assert len(items) == len(by_sku_size)
+
+    # FV27122-21: sold out (disabled) in both periods for every size ->
+    # OUT_OF_STOCK, quantity 0, no ETA.
     sold_out = [i for i in items if i.sku == "FV27122-21"]
-    assert len(sold_out) == 10
+    assert len(sold_out) == 5
     assert all(i.status == StockStatus.OUT_OF_STOCK for i in sold_out)
     assert all(i.quantity == 0 for i in sold_out)
     assert all(i.eta_date is None for i in sold_out)
     assert all(i.color == "Sepia Green" for i in sold_out)
     assert all(i.product_title == "Bike Wilson 40 | GX DH" for i in sold_out)
 
-    # FE26100-11: XS/S not offered at all (skipped), M/L/XL orderable in both
-    # periods with the portal's "10+" display cap - real max qty (25/28/32)
-    # comes from onchange, not the capped label.
-    fe11 = [i for i in items if i.sku == "FE26100-11"]
-    assert {(i.size) for i in fe11} == {"M", "L", "XL"}
-    assert len(fe11) == 6  # 3 sizes x 2 periods
+    # FE26100-11: XS/S never offered (gray/zero in both periods) ->
+    # OUT_OF_STOCK. M/L/XL in stock now, with the real (uncapped) quantity
+    # read from onchange even though the label shows the "10+" cap.
+    assert by_sku_size[("FE26100-11", "XS")].status == StockStatus.OUT_OF_STOCK
+    assert by_sku_size[("FE26100-11", "S")].status == StockStatus.OUT_OF_STOCK
+    m = by_sku_size[("FE26100-11", "M")]
+    assert (m.status, m.quantity, m.eta_date) == (StockStatus.IN_STOCK, 25, None)
+    assert by_sku_size[("FE26100-11", "L")].quantity == 28
+    assert by_sku_size[("FE26100-11", "XL")].quantity == 32
 
-    m1 = by_sku_size[("FE26100-11", "M", StockStatus.IN_STOCK)]
-    assert m1.quantity == 25
-    assert m1.eta_date is None
+    # FE26100-22: plain (non-capped) in-stock-now quantities.
+    fe22_m = by_sku_size[("FE26100-22", "M")]
+    assert (fe22_m.status, fe22_m.quantity) == (StockStatus.IN_STOCK, 7)
+    assert fe22_m.color == "Deep Olive"
+    assert fe22_m.regular_retail_price == 9999.0
+    assert by_sku_size[("FE26100-22", "L")].quantity == 4
+    assert by_sku_size[("FE26100-22", "XL")].quantity == 18
 
-    m2 = by_sku_size[("FE26100-11", "M", StockStatus.PRE_ORDER)]
-    assert m2.quantity == 25
-    assert m2.eta_date == "2026-08-16"  # txtDateDébutLivraison2
+    # FV27105-32: confirmed live by the user - 9 Smalls and 5 XLs in stock
+    # now (period 1), and M/L have zero stock *now* (gray period-1 cells)
+    # but ARE available as future production (period 2) -> PRE_ORDER, not
+    # OUT_OF_STOCK, since a gray period-1 cell doesn't mean the size is
+    # unoffered when period 2 has real stock. XS is gray/zero in both
+    # periods -> genuinely OUT_OF_STOCK.
+    s = by_sku_size[("FV27105-32", "S")]
+    assert (s.status, s.quantity, s.eta_date) == (StockStatus.IN_STOCK, 9, None)
+    xl = by_sku_size[("FV27105-32", "XL")]
+    assert (xl.status, xl.quantity, xl.eta_date) == (StockStatus.IN_STOCK, 5, None)
 
-    xl1 = by_sku_size[("FE26100-11", "XL", StockStatus.IN_STOCK)]
-    assert xl1.quantity == 32
+    m = by_sku_size[("FV27105-32", "M")]
+    assert (m.status, m.quantity, m.eta_date) == (StockStatus.PRE_ORDER, 15, "2026-08-16")
+    l = by_sku_size[("FV27105-32", "L")]
+    assert (l.status, l.quantity, l.eta_date) == (StockStatus.PRE_ORDER, 12, "2026-08-16")
 
-    # FE26100-22: plain (non-capped) quantities.
-    fe22_m1 = by_sku_size[("FE26100-22", "M", StockStatus.IN_STOCK)]
-    assert fe22_m1.quantity == 7
-    assert fe22_m1.color == "Deep Olive"
-    assert fe22_m1.regular_retail_price == 9999.0
-
-    fe22_l1 = by_sku_size[("FE26100-22", "L", StockStatus.IN_STOCK)]
-    assert fe22_l1.quantity == 4
-
-    fe22_xl2 = by_sku_size[("FE26100-22", "XL", StockStatus.PRE_ORDER)]
-    assert fe22_xl2.quantity == 18
-    assert fe22_xl2.eta_date == "2026-08-16"
+    xs = by_sku_size[("FV27105-32", "XS")]
+    assert (xs.status, xs.quantity, xs.eta_date) == (StockStatus.OUT_OF_STOCK, 0, None)
