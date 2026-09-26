@@ -47,6 +47,24 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
+  # Disabled - two pieces are unverified (see scrapers/devinci.py):
+  #   1. login(): no login page HTML has been captured yet at all.
+  #   2. fetch_stock()'s navigation: the order/booking grid page (Achats_
+  #      Treeview.aspx) has session-specific no=/Type= query params that
+  #      look like they're generated when a dealer opens an order in the
+  #      portal UI, not a fixed URL reachable right after login.
+  # The grid's own row/cell parsing IS confirmed against real portal HTML
+  # (_extract_stock_items_from_page, tested against tests/fixtures/
+  # devinci_product/achats_treeview.html) - just not how to reach that page.
+  # portal_url below is a placeholder (the real login URL was never seen).
+  - key: devinci
+    name: "Devinci"
+    portal_url: "https://example.invalid/devinci"
+    scraper: "kinetik_stock.scrapers.devinci.DevinciScraper"
+    username_env: "DEVINCI_USERNAME"
+    password_env: "DEVINCI_PASSWORD"
+    enabled: false
+
   # Confirmed working end-to-end against a real live login (search ->
   # click-through -> product page -> stock/status/ETA extraction), including
   # the "10+" display cap. See norco_report.py for its own report format.
