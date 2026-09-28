@@ -49,15 +49,19 @@ brands:
 
   # Disabled - login() has been confirmed working live by the user (this
   # sandbox itself still can't reach transac.devinci.com to verify
-  # anything - network policy). That same live run surfaced two real bugs,
-  # both now fixed (see scrapers/devinci.py): fetch_stock() only scraped
-  # the In Season grid, missing SKUs that only exist in Closeout, and
+  # anything - network policy). That same live run surfaced three real
+  # bugs, all now fixed (see scrapers/devinci.py): fetch_stock() only
+  # scraped the In Season grid, missing SKUs that only exist in Closeout;
   # build_availability_report() matched by SKU alone instead of (SKU,
   # size), expanding every input row to every scraped size of its SKU and
   # producing hundreds of duplicate rows against the user's real CSV
   # (which turned out to already be one row per SKU+size, not one row per
-  # SKU). Flip to enabled: true once the user re-runs this live and
-  # confirms both fixes actually solved it.
+  # SKU); and PRE_ORDER items' ETA used a single page-wide "future
+  # production" start date instead of each size's own real production
+  # schedule - fixed by fetching Achats_Cedule.aspx per (SKU, size) (the
+  # same request the real page makes on hover) and reporting the closest
+  # of its possibly-multiple dates. Flip to enabled: true once the user
+  # re-runs this live and confirms all three fixes actually solved it.
   # The grid's own row/cell parsing IS confirmed against real portal HTML
   # for both order types the user has captured (In Season, Closeout) -
   # _extract_stock_items_from_page(), tested against

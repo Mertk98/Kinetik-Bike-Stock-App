@@ -5,6 +5,7 @@ import logging
 import re
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode, urljoin
 
 from kinetik_stock.config import REPO_ROOT
 from kinetik_stock.models import StockItem, StockStatus
@@ -112,9 +113,10 @@ ROW_SELECTOR = "tr.rgRow, tr.rgAltRow"
 # Livraison2/txtDateFinLivraison2) - a later, separate delivery window.
 # Confirmed there are only 3 statuses (per the user, who has live access to
 # the portal): a size is IN_STOCK if period 1 has any quantity; otherwise
-# PRE_ORDER if period 2 has any quantity (ETA = period 2's start date);
-# otherwise OUT_OF_STOCK (no current or future availability at all) - this
-# covers both "sold out" and "this size isn't offered for this model".
+# PRE_ORDER if period 2 has any quantity (ETA - see PRODUCTION_SCHEDULE_PATH
+# below, not this page-wide field - it's only a fallback now); otherwise
+# OUT_OF_STOCK (no current or future availability at all) - this covers
+# both "sold out" and "this size isn't offered for this model".
 #
 # Per the user: the two periods' start dates can coincide (period 2 isn't
 # always later than period 1) - when they do, period 2 isn't really
@@ -122,6 +124,31 @@ ROW_SELECTOR = "tr.rgRow, tr.rgAltRow"
 # PRE_ORDER, and gets no ETA.
 PERIOD_1_START_DATE_FIELD = "txtDateDébutLivraison1"
 PERIOD_2_START_DATE_FIELD = "txtDateDébutLivraison2"
+
+# Per the user: this page-wide period-2 start date is NOT the real ETA for
+# a pre-order size - it's just a page-level summary field. The real,
+# per-(SKU, size) ETA comes from a "PRODUCTION SCHEDULE" the real page
+# fetches on hover (OuvrirPopUp_Cedule) from a separate page,
+# Achats_Cedule.aspx?MyItem=<code>&whse=<whse>&eut=<country>&desc=<desc>
+# &type=<order type token> - confirmed against a real captured
+# request/response pair. Every orderable cell's onmouseover carries these
+# exact args as OuvrirPopUp_Cedule(event, MyItem, whse, eut, desc, type) -
+# both periods' cells for the same size carry identical args (the
+# schedule doesn't depend on period), so either one works. The response is
+# a small HTML page with a "QUANTITY"/"AVAILABLE ON" table listing every
+# upcoming batch (confirmed: a size can have more than one, e.g. 3 units
+# 2027-01-05 and 5 units 2027-05-06) - per the user, the CLOSEST
+# (earliest) date is the one to report.
+ONMOUSEOVER_CEDULE_RE = re.compile(
+    r"OuvrirPopUp_Cedule\(event,\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)'\)"
+)
+SCHEDULE_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+PRODUCTION_SCHEDULE_PATH = "Achats_Cedule.aspx"
+
+
+def _closest_schedule_date(html: str) -> Optional[str]:
+    dates = SCHEDULE_DATE_RE.findall(html)
+    return min(dates) if dates else None
 
 SIZE_ORDER = ["XS", "S", "M", "L", "XL"]
 
@@ -439,6 +466,11 @@ class DevinciScraper(BaseScraper):
             # always has all 10 (5 sizes x 2 periods) cells present in the
             # real grid, whether or not they're orderable.
             period_qty = {size: {"1": 0, "2": 0} for size in SIZE_ORDER}
+            # An orderable cell's onmouseover carries the args
+            # OuvrirPopUp_Cedule(event, MyItem, whse, eut, desc, type) needed to
+            # fetch that size's real per-item production schedule - both
+            # periods' cells for a size carry identical args, so either is fine.
+            size_onmouseover: dict[str, str] = {}
             for qty_input in row.query_selector_all("input[type='text']"):
                 name = qty_input.get_attribute("name") or ""
                 match = QTY_FIELD_RE.search(name)
@@ -456,6 +488,10 @@ class DevinciScraper(BaseScraper):
                 qty_match = MAX_QTY_RE.search(onchange)
                 period_qty[size][period] = int(qty_match.group(1)) if qty_match else 0
 
+                onmouseover = qty_input.get_attribute("onmouseover")
+                if onmouseover:
+                    size_onmouseover[size] = onmouseover
+
             for size in SIZE_ORDER:
                 now_qty = period_qty[size]["1"]
                 future_qty = period_qty[size]["2"]
@@ -466,11 +502,16 @@ class DevinciScraper(BaseScraper):
                     if periods_coincide:
                         status, quantity, eta_date = StockStatus.IN_STOCK, future_qty, None
                     else:
-                        status, quantity, eta_date = (
-                            StockStatus.PRE_ORDER,
-                            future_qty,
-                            period_2_start,
-                        )
+                        # The page-wide period 2 start date is only a fallback -
+                        # the real ETA is the closest date in this size's own
+                        # production schedule (see PRODUCTION_SCHEDULE_PATH above).
+                        eta_date = period_2_start
+                        onmouseover = size_onmouseover.get(size)
+                        if onmouseover:
+                            fetched = self._fetch_closest_schedule_date(onmouseover)
+                            if fetched:
+                                eta_date = fetched
+                        status, quantity = StockStatus.PRE_ORDER, future_qty
                 else:
                     status, quantity, eta_date = StockStatus.OUT_OF_STOCK, 0, None
 
@@ -509,3 +550,27 @@ class DevinciScraper(BaseScraper):
     def _hidden_field_value(self, field_name: str) -> Optional[str]:
         field = self.page.query_selector(f"input[name='{field_name}']")
         return field.get_attribute("value") if field else None
+
+    def _fetch_closest_schedule_date(self, onmouseover: str) -> Optional[str]:
+        """Fetch Achats_Cedule.aspx for one size and return its closest date.
+
+        Confirmed against a real captured request/response pair: the page
+        fetches this itself on hover (OuvrirPopUp_Cedule), and a size's
+        schedule can list more than one future batch - the user confirmed
+        the closest (earliest) one is what should be reported as the ETA.
+        """
+        match = ONMOUSEOVER_CEDULE_RE.search(onmouseover)
+        if not match:
+            return None
+
+        item_code, whse, country, desc, order_type = match.groups()
+        query = urlencode(
+            {"MyItem": item_code, "whse": whse, "eut": country, "desc": desc, "type": order_type}
+        )
+        url = urljoin(self.page.url, PRODUCTION_SCHEDULE_PATH) + "?" + query
+        try:
+            response = self.page.request.get(url)
+            return _closest_schedule_date(response.text())
+        except Exception:
+            logger.warning("Couldn't fetch production schedule from %s", url)
+            return None

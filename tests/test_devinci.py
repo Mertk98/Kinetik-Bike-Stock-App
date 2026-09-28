@@ -13,6 +13,7 @@ from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers import devinci as devinci_module
 from kinetik_stock.scrapers.devinci import (
     DevinciScraper,
+    _closest_schedule_date,
     _load_devinci_items,
     _parse_size_from_description,
     _report_status_and_eta,
@@ -241,6 +242,146 @@ def test_extract_stock_items_from_page_matches_real_grid_structure():
 
     xs = by_sku_size[("FV27105-32", "XS")]
     assert (xs.status, xs.quantity, xs.eta_date) == (StockStatus.OUT_OF_STOCK, 0, None)
+
+
+def test_closest_schedule_date_picks_earliest_of_multiple_dates():
+    # Confirmed against a real captured Achats_Cedule.aspx response body (a
+    # "PRODUCTION SCHEDULE" QUANTITY/AVAILABLE ON table) that listed two
+    # future batches for one size: 3 units arriving 2027-01-05, and 5 more
+    # arriving 2027-05-06 - per the user, the closest (earliest) date is the
+    # one to report as the ETA.
+    html = """
+    <table>
+      <tr><th>QUANTITY</th><th>AVAILABLE ON</th></tr>
+      <tr><td>5</td><td>2027-05-06</td></tr>
+      <tr><td>3</td><td>2027-01-05</td></tr>
+    </table>
+    """
+    assert _closest_schedule_date(html) == "2027-01-05"
+
+
+def test_closest_schedule_date_returns_none_when_no_dates():
+    assert _closest_schedule_date("<table><tr><td>No batches scheduled</td></tr></table>") is None
+
+
+def test_fetch_closest_schedule_date_builds_url_and_parses_response(monkeypatch):
+    # Confirmed against a real captured request/response pair: hovering a
+    # cell calls OuvrirPopUp_Cedule(event, MyItem, whse, eut, desc, type),
+    # and _fetch_closest_schedule_date() must turn those same 5 args into a
+    # GET to Achats_Cedule.aspx and return the earliest date in the reply.
+    onmouseover = (
+        "OuvrirPopUp_Cedule(event,'FE26100322','MTL','CAN',"
+        "'Bike E-Spartan Lite Bosch SX Smart MX | GX AXS | Deep Olive','REPEAT')"
+    )
+
+    class FakeResponse:
+        def text(self):
+            return "<table><tr><td>2027-05-06</td></tr><tr><td>2027-01-05</td></tr></table>"
+
+    captured_urls = []
+
+    def fake_get(url):
+        captured_urls.append(url)
+        return FakeResponse()
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_PAGE)
+                monkeypatch.setattr(scraper.page.request, "get", fake_get)
+                result = scraper._fetch_closest_schedule_date(onmouseover)
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    assert result == "2027-01-05"
+    assert len(captured_urls) == 1
+    url = captured_urls[0]
+    assert "Achats_Cedule.aspx" in url
+    assert "MyItem=FE26100322" in url
+    assert "whse=MTL" in url
+    assert "eut=CAN" in url
+    assert "type=REPEAT" in url
+
+
+def test_fetch_closest_schedule_date_returns_none_for_unrecognized_onmouseover():
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_PAGE)
+                assert scraper._fetch_closest_schedule_date("not a real onmouseover") is None
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+
+def test_extract_stock_items_from_page_uses_per_size_production_schedule(monkeypatch):
+    # This fixture's page-wide period 2 start date is "2026-08-16" (the
+    # older, less accurate fallback) - confirm a pre-order size's real
+    # onmouseover args get routed into _fetch_closest_schedule_date() and
+    # that its result (the real per-size ETA) wins over the fallback.
+    brand_config = make_brand_config()
+    seen_onmouseover = []
+
+    def fake_fetch(self, onmouseover):
+        seen_onmouseover.append(onmouseover)
+        return "2027-01-05"
+
+    monkeypatch.setattr(DevinciScraper, "_fetch_closest_schedule_date", fake_fetch)
+
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_PAGE)
+                items = scraper._extract_stock_items_from_page()
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    by_sku_size = {(i.sku, i.size): i for i in items}
+    m = by_sku_size[("FV27105-32", "M")]
+    assert (m.status, m.quantity, m.eta_date) == (StockStatus.PRE_ORDER, 15, "2027-01-05")
+    l = by_sku_size[("FV27105-32", "L")]
+    assert (l.status, l.quantity, l.eta_date) == (StockStatus.PRE_ORDER, 12, "2027-01-05")
+    assert len(seen_onmouseover) == 2
+    assert all("OuvrirPopUp_Cedule" in s for s in seen_onmouseover)
+
+
+def test_extract_stock_items_from_page_falls_back_when_schedule_fetch_fails(monkeypatch):
+    # If the schedule fetch can't be resolved (network error, unrecognized
+    # markup, etc.) the page-wide period 2 start date is still better than
+    # no ETA at all, so it stays as the fallback.
+    brand_config = make_brand_config()
+    monkeypatch.setattr(
+        DevinciScraper, "_fetch_closest_schedule_date", lambda self, onmouseover: None
+    )
+
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_PAGE)
+                items = scraper._extract_stock_items_from_page()
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    by_sku_size = {(i.sku, i.size): i for i in items}
+    m = by_sku_size[("FV27105-32", "M")]
+    assert (m.status, m.quantity, m.eta_date) == (StockStatus.PRE_ORDER, 15, "2026-08-16")
 
 
 def test_extract_stock_items_treats_coincident_periods_as_in_stock(tmp_path):
