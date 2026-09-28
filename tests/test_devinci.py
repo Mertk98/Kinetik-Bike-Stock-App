@@ -271,7 +271,7 @@ def test_extract_stock_items_from_page_matches_closeout_description_markup(tmp_p
 def test_load_devinci_items(tmp_path):
     csv_path = tmp_path / "devinci_items.csv"
     csv_path.write_text(
-        "System ID,Manufacturer SKU,Item Description\n"
+        "System ID,Manufact. SKU,Description\n"
         "1,FV27105-32,Bike Spartan MX GX AXS Deep Olive\n"
         "2,,No Sku On File\n"
     )
@@ -347,7 +347,7 @@ def test_build_availability_report_expands_one_row_per_size():
     report_rows = build_availability_report(items, rows)
 
     matched = [r for r in report_rows if r["System ID"] == "1"]
-    assert [r["Item Description"] for r in matched] == [
+    assert [r["Description"] for r in matched] == [
         "Bike Spartan MX GX AXS Deep Olive - XS",
         "Bike Spartan MX GX AXS Deep Olive - S",
         "Bike Spartan MX GX AXS Deep Olive - M",
@@ -368,7 +368,7 @@ def test_build_availability_report_expands_one_row_per_size():
     # look up.
     no_sku = next(r for r in report_rows if r["System ID"] == "2")
     assert (no_sku["Status"], no_sku["ETA"]) == ("Discontinued", "N/A")
-    assert no_sku["Item Description"] == "No Sku On File"
+    assert no_sku["Description"] == "No Sku On File"
 
     not_found = next(r for r in report_rows if r["System ID"] == "3")
     assert (not_found["Status"], not_found["ETA"]) == ("N/A", "N/A")
@@ -377,7 +377,7 @@ def test_build_availability_report_expands_one_row_per_size():
 def test_generate_availability_report_uses_fetch_stock_and_expands_sizes(tmp_path, monkeypatch):
     csv_path = tmp_path / "devinci_items.csv"
     csv_path.write_text(
-        "System ID,Manufacturer SKU,Item Description\n"
+        "System ID,Manufact. SKU,Description\n"
         "1,FV27105-32,Bike Spartan MX GX AXS Deep Olive\n"
     )
 

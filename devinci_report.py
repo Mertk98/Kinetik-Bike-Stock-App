@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """CLI entrypoint: log into Devinci's B2B portal and produce the user's own
-availability report - the input CSV's columns (System ID, Manufacturer SKU,
-Item Description) plus Status/ETA, expanded to one row per size, distinct
+availability report - the input CSV's columns (System ID, Manufact. SKU,
+Description) plus Status/ETA, expanded to one row per size, distinct
 from the shared multi-brand CSV produced by run.py.
 
 NOT runnable yet: DevinciScraper.login() and fetch_stock()'s navigation are

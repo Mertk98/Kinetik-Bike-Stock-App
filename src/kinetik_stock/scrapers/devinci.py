@@ -87,28 +87,30 @@ def split_description(description: str) -> tuple[str, Optional[str]]:
 
 
 # config/devinci_items.csv is the user's own inventory export (same idea as
-# Norco's config/norco_items.csv), one row per Manufacturer SKU they carry -
-# not one row per size, since Devinci's own SKU already covers every size of
-# one model/color. generate_availability_report() expands each matched SKU
-# back out to one report row per size (the size is appended to the Item
-# Description, per the user), since a single SKU's 5 sizes can each have a
-# different status.
+# Norco's config/norco_items.csv, and confirmed against the user's real
+# file to use the same 3 column headers as Norco's: "System ID",
+# "Manufact. SKU", "Description") - one row per Manufacturer SKU they
+# carry, not one row per size, since Devinci's own SKU already covers
+# every size of one model/color. generate_availability_report() expands
+# each matched SKU back out to one report row per size (the size is
+# appended to the Description, per the user), since a single SKU's 5
+# sizes can each have a different status.
 DEVINCI_ITEMS_CSV = REPO_ROOT / "config" / "devinci_items.csv"
-DEVINCI_REPORT_FIELDNAMES = ["System ID", "Manufacturer SKU", "Item Description", "Status", "ETA"]
+DEVINCI_REPORT_FIELDNAMES = ["System ID", "Manufact. SKU", "Description", "Status", "ETA"]
 
 
 def _load_devinci_items(path: Path = DEVINCI_ITEMS_CSV) -> list[dict]:
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found - add a CSV with 'System ID', 'Manufacturer SKU', "
-            "'Item Description' columns (the user's own inventory export)."
+            f"{path} not found - add a CSV with 'System ID', 'Manufact. SKU', "
+            "'Description' columns (the user's own inventory export)."
         )
     with open(path, newline="", encoding="utf-8") as f:
         rows = [
             {
                 "system_id": row["System ID"].strip(),
-                "manufacturer_sku": (row.get("Manufacturer SKU") or "").strip(),
-                "item_description": row["Item Description"].strip(),
+                "manufacturer_sku": (row.get("Manufact. SKU") or "").strip(),
+                "item_description": row["Description"].strip(),
             }
             for row in csv.DictReader(f)
         ]
@@ -163,8 +165,8 @@ def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[
             report_rows.append(
                 {
                     "System ID": system_id,
-                    "Manufacturer SKU": sku,
-                    "Item Description": description,
+                    "Manufact. SKU": sku,
+                    "Description": description,
                     "Status": "Discontinued",
                     "ETA": "N/A",
                 }
@@ -179,8 +181,8 @@ def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[
             report_rows.append(
                 {
                     "System ID": system_id,
-                    "Manufacturer SKU": sku,
-                    "Item Description": description,
+                    "Manufact. SKU": sku,
+                    "Description": description,
                     "Status": "N/A",
                     "ETA": "N/A",
                 }
@@ -192,8 +194,8 @@ def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[
             report_rows.append(
                 {
                     "System ID": system_id,
-                    "Manufacturer SKU": sku,
-                    "Item Description": f"{description} - {size_item.size}",
+                    "Manufact. SKU": sku,
+                    "Description": f"{description} - {size_item.size}",
                     "Status": status_text,
                     "ETA": eta_text,
                 }
@@ -255,7 +257,7 @@ class DevinciScraper(BaseScraper):
     confirmed against the real portal.
 
     generate_availability_report() reproduces the user's own report format
-    (System ID, Manufacturer SKU, Item Description, Status, ETA), like
+    (System ID, Manufact. SKU, Description, Status, ETA), like
     NorcoScraper.generate_availability_report() - see build_availability_report()
     above for the matching/expansion logic, which is independently testable
     without a working fetch_stock().
@@ -283,7 +285,7 @@ class DevinciScraper(BaseScraper):
         self, input_csv: Path = DEVINCI_ITEMS_CSV
     ) -> list[dict]:
         """Produces the user's own report format: the input CSV's 3 columns
-        (System ID, Manufacturer SKU, Item Description) plus Status/ETA,
+        (System ID, Manufact. SKU, Description) plus Status/ETA,
         expanded to one row per size for each matched SKU. Depends on
         fetch_stock(), so it can't run end-to-end until that's confirmed
         (see the class docstring) - build_availability_report() has the
