@@ -157,14 +157,15 @@ def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[
         description = row["item_description"]
 
         if not sku:
-            # No Manufacturer SKU on file - mirrors Norco's convention of
-            # treating that as discontinued rather than unresolved.
+            # Per the user: no item number on file at all means the bike is
+            # considered N/A (not available), same as a SKU that's present
+            # but wasn't found in the scraped catalog below.
             report_rows.append(
                 {
                     "System ID": system_id,
                     "Manufacturer SKU": sku,
                     "Item Description": description,
-                    "Status": "Discontinued",
+                    "Status": "N/A",
                     "ETA": "N/A",
                 }
             )
