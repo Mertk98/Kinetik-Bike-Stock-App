@@ -570,7 +570,17 @@ class DevinciScraper(BaseScraper):
         url = urljoin(self.page.url, PRODUCTION_SCHEDULE_PATH) + "?" + query
         try:
             response = self.page.request.get(url)
-            return _closest_schedule_date(response.text())
-        except Exception:
-            logger.warning("Couldn't fetch production schedule from %s", url)
+        except Exception as exc:
+            logger.warning("Couldn't fetch production schedule from %s: %r", url, exc)
             return None
+
+        if not response.ok:
+            logger.warning(
+                "Production schedule fetch got HTTP %s from %s: %.200r",
+                response.status,
+                url,
+                response.text(),
+            )
+            return None
+
+        return _closest_schedule_date(response.text())

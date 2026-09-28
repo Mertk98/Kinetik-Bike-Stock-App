@@ -275,6 +275,8 @@ def test_fetch_closest_schedule_date_builds_url_and_parses_response(monkeypatch)
     )
 
     class FakeResponse:
+        ok = True
+
         def text(self):
             return "<table><tr><td>2027-05-06</td></tr><tr><td>2027-01-05</td></tr></table>"
 
@@ -306,6 +308,38 @@ def test_fetch_closest_schedule_date_builds_url_and_parses_response(monkeypatch)
     assert "whse=MTL" in url
     assert "eut=CAN" in url
     assert "type=REPEAT" in url
+
+
+def test_fetch_closest_schedule_date_returns_none_on_non_ok_response(monkeypatch, caplog):
+    # A non-2xx response (e.g. a session/auth problem) shouldn't be parsed
+    # as if it were a schedule table - it should be treated as a failure
+    # and logged with enough detail (status + body) to diagnose live.
+    onmouseover = "OuvrirPopUp_Cedule(event,'FE26100322','MTL','CAN','desc','REPEAT')"
+
+    class FakeResponse:
+        ok = False
+        status = 500
+
+        def text(self):
+            return "Internal Server Error"
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_PAGE)
+                monkeypatch.setattr(scraper.page.request, "get", lambda url: FakeResponse())
+                with caplog.at_level("WARNING"):
+                    result = scraper._fetch_closest_schedule_date(onmouseover)
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    assert result is None
+    assert "HTTP 500" in caplog.text
 
 
 def test_fetch_closest_schedule_date_returns_none_for_unrecognized_onmouseover():
