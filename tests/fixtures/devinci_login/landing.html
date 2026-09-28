@@ -1,0 +1,17 @@
+<!--
+Stand-in for whatever page transac.devinci.com actually lands on right
+after a successful login - that page itself hasn't been captured, so its
+real markup is unconfirmed (see devinci.py's LOGGED_IN_SELECTOR comment).
+This fixture only reproduces the one confirmed element login() checks for:
+a "LOGOUT" link/control with id="cmdFermer", copied verbatim from the real
+captured order-grid pages (Achats_Treeview.aspx, both order types), where
+it reads:
+  <a onclick="Logout();" id="cmdFermer" class="Langue"
+     href="javascript:__doPostBack('cmdFermer','')">LOGOUT</a>
+-->
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<a onclick="Logout();" id="cmdFermer" class="Langue" href="javascript:__doPostBack('cmdFermer','')">LOGOUT</a>
+</body>
+</html>

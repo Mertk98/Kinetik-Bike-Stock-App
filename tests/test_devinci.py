@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright
 from kinetik_stock.browser import launch_chromium
 from kinetik_stock.config import BrandConfig
 from kinetik_stock.models import StockItem, StockStatus
+from kinetik_stock.scrapers import devinci as devinci_module
 from kinetik_stock.scrapers.devinci import (
     DevinciScraper,
     _load_devinci_items,
@@ -22,6 +23,9 @@ FIXTURE_PAGE = (
     (Path(__file__).parent / "fixtures" / "devinci_product" / "achats_treeview.html")
     .resolve()
     .as_uri()
+)
+LOGIN_FIXTURE_PAGE = (
+    (Path(__file__).parent / "fixtures" / "devinci_login" / "login.html").resolve().as_uri()
 )
 
 
@@ -53,14 +57,58 @@ def test_split_description():
     assert split_description("Bike Milano 2 AL13") == ("Bike Milano 2 AL13", None)
 
 
-def test_login_is_unverified():
-    brand_config = make_brand_config()
+def test_login_fills_credentials_and_confirms_via_logout_link(monkeypatch):
+    # Exercises login() end-to-end against the real confirmed field/button
+    # selectors (txtLogin/txtPassword/cmdLogin) and the LOGGED_IN_SELECTOR
+    # check (#cmdFermer), using the fixture pair described in
+    # tests/fixtures/devinci_login/ - a stand-in backend, not the real
+    # portal (still unreachable from this sandbox).
+    monkeypatch.setenv("TEST_DEVINCI_USERNAME", "demo_user")
+    monkeypatch.setenv("TEST_DEVINCI_PASSWORD", "demo_pass")
+    brand_config = BrandConfig(
+        key="devinci",
+        name="Devinci",
+        portal_url=LOGIN_FIXTURE_PAGE,
+        scraper="kinetik_stock.scrapers.devinci.DevinciScraper",
+        username_env="TEST_DEVINCI_USERNAME",
+        password_env="TEST_DEVINCI_PASSWORD",
+    )
+
     with sync_playwright() as p:
         browser = launch_chromium(p, headless=True)
         try:
             scraper = DevinciScraper(brand_config, browser)
             try:
-                with pytest.raises(NotImplementedError):
+                scraper.login()
+                assert scraper.page.url.endswith("landing.html")
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+
+def test_login_raises_when_logged_in_selector_never_appears(monkeypatch):
+    # No credentials filled in -> the fixture backend never redirects, so
+    # the real page's LOGOUT link never shows up. Timeout shortened so this
+    # test doesn't have to burn the real 15s LOGGED_IN_CHECK_TIMEOUT_MS.
+    monkeypatch.setattr(devinci_module, "LOGGED_IN_CHECK_TIMEOUT_MS", 500)
+    monkeypatch.setenv("TEST_DEVINCI_USERNAME", "")
+    monkeypatch.setenv("TEST_DEVINCI_PASSWORD", "")
+    brand_config = BrandConfig(
+        key="devinci",
+        name="Devinci",
+        portal_url=LOGIN_FIXTURE_PAGE,
+        scraper="kinetik_stock.scrapers.devinci.DevinciScraper",
+        username_env="TEST_DEVINCI_USERNAME",
+        password_env="TEST_DEVINCI_PASSWORD",
+    )
+
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                with pytest.raises(RuntimeError):
                     scraper.login()
             finally:
                 scraper.close()

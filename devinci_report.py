@@ -4,10 +4,11 @@ availability report - the input CSV's columns (System ID, Manufact. SKU,
 Description) plus Status/ETA, expanded to one row per size, distinct
 from the shared multi-brand CSV produced by run.py.
 
-NOT runnable yet: DevinciScraper.login() and fetch_stock()'s navigation are
-both unverified (see src/kinetik_stock/scrapers/devinci.py) and raise
+NOT runnable yet: login() is now implemented against a real captured login
+page, but fetch_stock()'s navigation from there to an order grid is still
+unverified (see src/kinetik_stock/scrapers/devinci.py) and raises
 NotImplementedError. This mirrors norco_report.py's shape so it's ready to
-go once those are confirmed against the real portal.
+go once that's confirmed against the real portal.
 
 Usage:
     python devinci_report.py

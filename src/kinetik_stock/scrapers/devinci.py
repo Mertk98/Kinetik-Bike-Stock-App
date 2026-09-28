@@ -12,6 +12,26 @@ from kinetik_stock.scrapers.base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
+# Confirmed against the real login page (transac.devinci.com's landing page,
+# pasted directly from a live session): a plain 2-field ASP.NET WebForms
+# login (id="Login"), not a 3-field one like Norco's. The fields' name/id
+# are the same ("txtLogin"/"txtPassword"), and the submit control is an
+# <input type="submit"> (not a <button>), id="cmdLogin". There's also a
+# language RadComboBox (cmdLangue, defaulting to "Français") with its own
+# "OK" button (cmdLangueOk) - unrelated to login, since txtLogin/txtPassword
+# are already present and fillable on this same page without touching it.
+USERNAME_SELECTOR = "#txtLogin"
+PASSWORD_SELECTOR = "#txtPassword"
+LOGIN_BUTTON_SELECTOR = "#cmdLogin"
+# Confirmed present on both real captured post-login pages (the In Season
+# and Closeout order grids): a "LOGOUT" link, id="cmdFermer". NOT confirmed
+# on whatever page login() itself lands on right after submitting - that
+# depends on the still-unverified post-login navigation (see fetch_stock()
+# and the class docstring) - so this assumes it's part of a shared
+# authenticated-pages header rather than something specific to the grid.
+LOGGED_IN_SELECTOR = "#cmdFermer"
+LOGGED_IN_CHECK_TIMEOUT_MS = 15000
+
 # Confirmed against a real order/booking page (Achats_Treeview.aspx, "In
 # Season" order type) pasted directly from a live dealer session. Devinci's
 # portal isn't a simple stock-lookup page like Norco/Transition - it's a
@@ -238,13 +258,19 @@ class DevinciScraper(BaseScraper):
     product-page link) - both share the id suffix "_MyHyperlink", which is
     what description_el is now matched on below instead of a class name.
 
+    login() is now implemented against a real captured login page (see the
+    module-level selector comments above) - a plain 2-field ASP.NET
+    WebForms form (txtLogin/txtPassword/cmdLogin), unlike Norco's 3-field
+    one. It could not be run live from this sandbox (network policy blocks
+    transac.devinci.com), so it's implemented from the captured HTML but
+    its "logged in" check (waiting for #cmdFermer) is an assumption -
+    confirmed present on the post-login grid pages, not confirmed on
+    whatever page comes immediately after submitting login.
+
     UNVERIFIED and NOT implemented:
-      - login(): no login page HTML has been captured yet, so there are no
-        confirmed selectors for the username/password fields, the submit
-        control, or a "logged in" check.
-      - The navigation path from the post-login landing page to an order
-        grid: the grid's own URL (Achats_Treeview.aspx?no=<order id>&Type=
-        <order type guid>) has session-specific query params that get
+      - fetch_stock()'s navigation path from wherever login() lands to an
+        order grid: the grid's own URL (Achats_Treeview.aspx?no=<order id>
+        &Type=<order type guid>) has session-specific query params that get
         generated per order instance, not a fixed URL reachable right
         after login - confirmed by 4 different real no= values seen across
         separate sessions/order types. There's also a Menu.aspx?no=<order
@@ -253,7 +279,7 @@ class DevinciScraper(BaseScraper):
         link) - whether that's a required intermediate step or just where
         they happened to copy the URL from is unconfirmed.
 
-    Keep `enabled: false` in config/brands.yaml until both of the above are
+    Keep `enabled: false` in config/brands.yaml until the above is
     confirmed against the real portal.
 
     generate_availability_report() reproduces the user's own report format
@@ -264,12 +290,20 @@ class DevinciScraper(BaseScraper):
     """
 
     def login(self) -> None:
-        raise NotImplementedError(
-            f"{self.brand_config.name} login() is unverified - no login page "
-            "HTML has been captured yet, so there are no confirmed selectors "
-            "for the username/password fields or submit control. Capture the "
-            "real login page HTML before implementing this."
-        )
+        self.page.goto(self.brand_config.portal_url)
+        self.page.fill(USERNAME_SELECTOR, self.brand_config.username or "")
+        self.page.fill(PASSWORD_SELECTOR, self.brand_config.password or "")
+        self.page.click(LOGIN_BUTTON_SELECTOR)
+
+        try:
+            self.page.wait_for_selector(
+                LOGGED_IN_SELECTOR, state="attached", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
+            )
+        except Exception:
+            raise RuntimeError(
+                f"Login to {self.brand_config.name} failed (no logout link found) - "
+                f"check {self.brand_config.username_env}/{self.brand_config.password_env}."
+            )
 
     def fetch_stock(self) -> list[StockItem]:
         raise NotImplementedError(

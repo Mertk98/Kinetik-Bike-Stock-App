@@ -1,0 +1,40 @@
+<!--
+Trimmed copy of the real Devinci B2B portal login page (transac.devinci.com's
+landing page), pasted directly by the user from a live session - the form id,
+field names/ids, and submit control below are copied verbatim (id="Login",
+txtLogin, txtPassword, cmdLogin - a plain 2-field ASP.NET WebForms login,
+unlike Norco's 3-field one). The unrelated language RadComboBox
+(cmdLangue/cmdLangueOk) and all ASP.NET/Telerik script tags are dropped for
+readability - login() doesn't touch them.
+
+The inline script at the bottom is NOT part of the real page - it's a
+stand-in for the real ASP.NET backend (same idea as
+tests/fixtures/example_b2b/login.html), so this fixture can exercise
+login()'s fill/submit/logged-in-check flow end-to-end without live
+credentials. It redirects to landing.html (a stand-in for whatever page
+transac.devinci.com itself lands on after login - unconfirmed, see
+devinci.py's LOGGED_IN_SELECTOR comment) once both fields are non-empty.
+-->
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><meta charset="utf-8">
+<title>Welcome to the Cycles Devinci website / Bienvenue sur le site transactionnel de Cycles Devinci</title>
+</head>
+<body>
+<form method="post" action="./" id="Login">
+<input type="text" name="txtLogin" id="txtLogin" maxlength="50">
+<input type="password" name="txtPassword" id="txtPassword" maxlength="20">
+<input type="submit" name="cmdLogin" value="OK" id="cmdLogin">
+</form>
+
+<script>
+document.getElementById("Login").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const username = document.getElementById("txtLogin").value;
+  const password = document.getElementById("txtPassword").value;
+  if (username && password) {
+    window.location.href = "landing.html";
+  }
+});
+</script>
+</body>
+</html>

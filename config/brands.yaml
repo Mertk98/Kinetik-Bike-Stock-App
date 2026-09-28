@@ -47,23 +47,24 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled - two pieces are unverified (see scrapers/devinci.py):
-  #   1. login(): no login page HTML has been captured yet at all.
-  #   2. fetch_stock()'s navigation: the order/booking grid page (Achats_
-  #      Treeview.aspx) has session-specific no=/Type= query params
-  #      generated per order instance, not a fixed URL reachable right
-  #      after login - confirmed by 4 different real no= values seen so
-  #      far. There are 2 order types (In Season, Closeout), each its own
-  #      Type= GUID - both now have real captured grid HTML.
+  # Disabled - one piece is still unverified (see scrapers/devinci.py):
+  #   fetch_stock()'s navigation: the order/booking grid page (Achats_
+  #   Treeview.aspx) has session-specific no=/Type= query params generated
+  #   per order instance, not a fixed URL reachable right after login -
+  #   confirmed by 4 different real no= values seen so far. There are 2
+  #   order types (In Season, Closeout), each its own Type= GUID - both
+  #   now have real captured grid HTML.
   # The grid's own row/cell parsing IS confirmed against real portal HTML
   # for BOTH order types (_extract_stock_items_from_page, tested against
   # tests/fixtures/devinci_product/achats_treeview.html plus a synthetic
   # page built from confirmed Closeout markup in tests/test_devinci.py) -
   # same RadGrid1 layout and field-name/onchange conventions either way,
   # just not how to reach that page in the first place.
-  # portal_url below is the confirmed real domain (transac.devinci.com),
-  # but not a confirmed login URL - this sandbox's network policy blocks
-  # outbound access to that host, so the exact login path is unverified.
+  # login() is now implemented against a real captured login page
+  # (tests/fixtures/devinci_login/) - portal_url below is the confirmed
+  # real domain and login URL (transac.devinci.com), but this sandbox's
+  # network policy blocks outbound access to that host, so it's never
+  # actually been run live.
   - key: devinci
     name: "Devinci"
     portal_url: "https://transac.devinci.com/"
