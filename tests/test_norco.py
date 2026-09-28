@@ -326,8 +326,8 @@ def test_generate_availability_report(tmp_path, monkeypatch):
     assert by_system_id["1"]["Status"] == "Available (7)"
     assert by_system_id["1"]["ETA"] == "Now"
 
-    # No Manufact. SKU on file at all is treated as N/A (per the user).
-    assert by_system_id["2"]["Status"] == "N/A"
+    # No Manufact. SKU on file is treated as discontinued.
+    assert by_system_id["2"]["Status"] == "Discontinued"
     assert by_system_id["2"]["ETA"] == "N/A"
 
     assert by_system_id["3"]["Status"] == "N/A"

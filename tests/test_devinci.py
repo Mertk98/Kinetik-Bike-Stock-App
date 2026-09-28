@@ -363,11 +363,11 @@ def test_build_availability_report_expands_one_row_per_size():
     ]
     assert [r["ETA"] for r in matched] == ["N/A", "Now", "2026-08-16", "2026-08-16", "Now"]
 
-    # No Manufacturer SKU on file at all is treated as N/A, same as a SKU
-    # that's present but not found (per the user), and isn't
-    # expanded/appended since there's nothing to look up.
+    # No Manufacturer SKU on file at all is treated as discontinued (per
+    # the user), and isn't expanded/appended since there's nothing to
+    # look up.
     no_sku = next(r for r in report_rows if r["System ID"] == "2")
-    assert (no_sku["Status"], no_sku["ETA"]) == ("N/A", "N/A")
+    assert (no_sku["Status"], no_sku["ETA"]) == ("Discontinued", "N/A")
     assert no_sku["Item Description"] == "No Sku On File"
 
     not_found = next(r for r in report_rows if r["System ID"] == "3")

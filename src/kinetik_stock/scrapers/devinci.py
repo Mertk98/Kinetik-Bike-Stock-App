@@ -158,14 +158,14 @@ def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[
 
         if not sku:
             # Per the user: no item number on file at all means the bike is
-            # considered N/A (not available), same as a SKU that's present
-            # but wasn't found in the scraped catalog below.
+            # considered discontinued, unlike a SKU that's present but
+            # wasn't found in the scraped catalog below (reported as N/A).
             report_rows.append(
                 {
                     "System ID": system_id,
                     "Manufacturer SKU": sku,
                     "Item Description": description,
-                    "Status": "N/A",
+                    "Status": "Discontinued",
                     "ETA": "N/A",
                 }
             )

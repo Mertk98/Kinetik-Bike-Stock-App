@@ -194,10 +194,8 @@ class NorcoScraper(BaseScraper):
     pipeline. generate_availability_report() instead reproduces the user's
     own report format - the original 3 columns plus Status/ETA text
     formatted their way ("Available (N)"/"Now", "pre-order"/<date>,
-    "Discontinued"/"N/A" for an item the portal itself marks inactive,
-    "Out of Stock"/"N/A"). A row with no Manufact. SKU on file at all is
-    "N/A"/"N/A" instead (per the user), same as a SKU that's present but
-    wasn't found - there's simply nothing to look up for either.
+    "Discontinued"/"N/A", "Out of Stock"/"N/A") - including rows with no
+    Manufact. SKU on file, which can't be looked up at all.
 
     Unverified: whether there's a "low stock" distinction at all - see
     _status_and_eta().
@@ -268,10 +266,8 @@ class NorcoScraper(BaseScraper):
 
             if not item_number:
                 # No Manufact. SKU on file at all means LTP has nothing to
-                # search for - per the user, treated as N/A like an item
-                # number that's present but not found (the "N/A", "N/A"
-                # default set above already covers this).
-                pass
+                # search for - per the user, treated as discontinued.
+                status_text, eta_text = "Discontinued", "N/A"
             else:
                 try:
                     page_items = self._scrape_item_page(item_number)
