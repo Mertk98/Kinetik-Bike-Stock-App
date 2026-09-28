@@ -59,7 +59,17 @@ RENTAL_ORDERS_TYPE_GUID = "561820CE46BC40A0A7DE2CEB0372A8B7"
 # non-navigating control, no Type= GUID in its href at all) that a
 # text-based selector could collide with.
 IN_SEASON_MENU_LINK_SELECTOR = f"a[href*='{IN_SEASON_TYPE_GUID}']"
+CLOSEOUT_MENU_LINK_SELECTOR = f"a[href*='{CLOSEOUT_TYPE_GUID}']"
 ORDER_GRID_LOAD_TIMEOUT_MS = 15000
+
+# Confirmed live: the user's own inventory (config/devinci_items.csv) isn't
+# limited to current-season bikes - several of their real SKUs (e.g.
+# FV23043-A5, FE23089-31, FV25110-22, FV26110-26) only showed up in a real
+# Closeout grid capture, not the In Season one, and came back "not found in
+# the scraped catalog" when fetch_stock() only visited In Season. So
+# fetch_stock() below scrapes both grids and combines their items - the
+# user's dealer stock spans both order types, not just one.
+FETCH_STOCK_MENU_LINK_SELECTORS = [IN_SEASON_MENU_LINK_SELECTOR, CLOSEOUT_MENU_LINK_SELECTOR]
 
 # Confirmed against a real order/booking page (Achats_Treeview.aspx, "In
 # Season" order type) pasted directly from a live dealer session. Devinci's
@@ -135,17 +145,45 @@ def split_description(description: str) -> tuple[str, Optional[str]]:
     return description.strip(), None
 
 
+# Confirmed against the user's real 128-row inventory CSV: unlike the
+# assumption this module started with, each row is already one specific
+# SKU+size, not one row per SKU covering all 5 sizes - the same
+# Manufact. SKU repeats across several rows, one per size, and the size
+# itself isn't a separate column but the leading letters of the
+# description's last whitespace-separated token, e.g. "S29" -> S,
+# "M29/27" -> M, "XL29" -> XL, "XS27" -> XS, "S29/27.5" -> S (a decimal
+# second wheel-size number). Verified this pattern covers all 128 real
+# rows with no exceptions.
+SIZE_SUFFIX_RE = re.compile(r"^(XS|XL|S|M|L)\d+(?:/\d+(?:\.\d+)?)?$")
+
+
+def _parse_size_from_description(description: str) -> Optional[str]:
+    tokens = description.strip().split()
+    if not tokens:
+        return None
+    match = SIZE_SUFFIX_RE.match(tokens[-1])
+    return match.group(1) if match else None
+
+
 # config/devinci_items.csv is the user's own inventory export (same idea as
 # Norco's config/norco_items.csv, and confirmed against the user's real
 # file to use the same 3 column headers as Norco's: "System ID",
-# "Manufact. SKU", "Description") - one row per Manufacturer SKU they
-# carry, not one row per size, since Devinci's own SKU already covers
-# every size of one model/color. generate_availability_report() expands
-# each matched SKU back out to one report row per size (the size is
-# appended to the Description, per the user), since a single SKU's 5
-# sizes can each have a different status.
+# "Manufact. SKU", "Description") - one row per SKU+size already (see
+# _parse_size_from_description above), not one row per SKU to expand out,
+# so build_availability_report() below matches each input row against the
+# one scraped StockItem for that exact (SKU, size) pair, producing exactly
+# one output row per input row - not one per scraped size, which is what
+# this module originally (and wrongly) assumed and caused duplicate rows
+# for every size of a SKU on every one of that SKU's own input rows.
 DEVINCI_ITEMS_CSV = REPO_ROOT / "config" / "devinci_items.csv"
-DEVINCI_REPORT_FIELDNAMES = ["System ID", "Manufact. SKU", "Description", "Status", "ETA"]
+DEVINCI_REPORT_FIELDNAMES = [
+    "System ID",
+    "Manufact. SKU",
+    "Description",
+    "Size",
+    "Status",
+    "ETA",
+]
 
 
 def _load_devinci_items(path: Path = DEVINCI_ITEMS_CSV) -> list[dict]:
@@ -191,21 +229,24 @@ def _report_status_and_eta(item: StockItem) -> tuple[str, str]:
 
 
 def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[dict]:
-    """Pure function: matches each input row's Manufacturer SKU against
-    already-scraped StockItems and expands it to one report row per size.
-    Kept separate from generate_availability_report() so it's testable
-    without needing a working fetch_stock() (still unverified - see the
-    class docstring).
+    """Pure function: matches each input row's (Manufacturer SKU, size) -
+    the size parsed from the row's own Description, see
+    _parse_size_from_description() above - against the one already-scraped
+    StockItem for that exact pair, producing exactly one report row per
+    input row. Kept separate from generate_availability_report() so it's
+    testable without needing a working fetch_stock() (not yet confirmed
+    live - see the class docstring).
     """
-    items_by_sku: dict[str, list[StockItem]] = {}
-    for item in items:
-        items_by_sku.setdefault(item.sku, []).append(item)
+    items_by_sku_and_size: dict[tuple[str, Optional[str]], StockItem] = {
+        (item.sku, item.size): item for item in items
+    }
 
     report_rows: list[dict] = []
     for row in rows:
         system_id = row["system_id"]
         sku = row["manufacturer_sku"]
         description = row["item_description"]
+        size = _parse_size_from_description(description)
 
         if not sku:
             # Per the user: no item number on file at all means the bike is
@@ -216,39 +257,44 @@ def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[
                     "System ID": system_id,
                     "Manufact. SKU": sku,
                     "Description": description,
+                    "Size": size or "",
                     "Status": "Discontinued",
                     "ETA": "N/A",
                 }
             )
             continue
 
-        matched = items_by_sku.get(sku)
-        if not matched:
+        matched = items_by_sku_and_size.get((sku, size)) if size else None
+        if matched is None:
             logger.warning(
-                "SKU %s (%r) wasn't found in the scraped catalog.", sku, description
+                "SKU %s size %s (%r) wasn't found in the scraped catalog.",
+                sku,
+                size,
+                description,
             )
             report_rows.append(
                 {
                     "System ID": system_id,
                     "Manufact. SKU": sku,
                     "Description": description,
+                    "Size": size or "",
                     "Status": "N/A",
                     "ETA": "N/A",
                 }
             )
             continue
 
-        for size_item in sorted(matched, key=lambda i: SIZE_ORDER.index(i.size)):
-            status_text, eta_text = _report_status_and_eta(size_item)
-            report_rows.append(
-                {
-                    "System ID": system_id,
-                    "Manufact. SKU": sku,
-                    "Description": f"{description} - {size_item.size}",
-                    "Status": status_text,
-                    "ETA": eta_text,
-                }
-            )
+        status_text, eta_text = _report_status_and_eta(matched)
+        report_rows.append(
+            {
+                "System ID": system_id,
+                "Manufact. SKU": sku,
+                "Description": description,
+                "Size": size,
+                "Status": status_text,
+                "ETA": eta_text,
+            }
+        )
 
     return report_rows
 
@@ -289,18 +335,26 @@ class DevinciScraper(BaseScraper):
 
     login() is implemented against a real captured login page - a plain
     2-field ASP.NET WebForms form (txtLogin/txtPassword/cmdLogin), unlike
-    Norco's 3-field one. fetch_stock() is implemented against a real
-    captured Menu.aspx (the confirmed post-login landing page): it clicks
-    the "In season" link (matched by its onclick's Type= GUID, see
-    IN_SEASON_MENU_LINK_SELECTOR above) and waits for the resulting order
-    grid to load, then reuses _extract_stock_items_from_page(). Neither
-    could be run live from this sandbox (network policy blocks
-    transac.devinci.com entirely), so both are implemented from captured
-    HTML and their own local fixture tests, not confirmed end-to-end
-    against the real portal yet.
+    Norco's 3-field one. Confirmed working live by the user (this sandbox
+    itself still can't reach transac.devinci.com - network policy).
 
-    Keep `enabled: false` in config/brands.yaml until a real live run
-    confirms both login() and fetch_stock() actually work end-to-end.
+    fetch_stock() clicks through Menu.aspx (the confirmed post-login
+    landing page) to each order type's grid in turn - In Season, then
+    Closeout - and combines their items, matching each input CSV row
+    against the exact (SKU, size) pair scraped. Confirmed necessary live:
+    the user's own inventory spans both order types, not just In Season -
+    several real SKUs only exist in the Closeout catalog. Also confirmed
+    live: the real login()/fetch_stock() run wrote a report, but with two
+    bugs now fixed - see build_availability_report()'s docstring for the
+    (SKU, size) matching fix (was wrongly expanding every input row to
+    every scraped size of its SKU) and the module comment above
+    DEVINCI_ITEMS_CSV for why the input CSV needed reinterpreting as
+    already one row per size, not one row per SKU.
+
+    Keep `enabled: false` in config/brands.yaml until the user re-runs this
+    live and confirms the Closeout+size-matching fixes above actually
+    solved the duplicate-rows and missing-Closeout-SKUs problems seen on
+    their first real run.
 
     generate_availability_report() reproduces the user's own report format
     (System ID, Manufact. SKU, Description, Status, ETA), like
@@ -325,25 +379,37 @@ class DevinciScraper(BaseScraper):
                 f"check {self.brand_config.username_env}/{self.brand_config.password_env}."
             )
 
+        # Menu.aspx's own URL carries the per-session no= value (see the
+        # module comment above IN_SEASON_TYPE_GUID) - fetch_stock() revisits
+        # this exact URL before clicking each order type's link, since
+        # clicking one navigates away from the menu entirely.
+        self._menu_url = self.page.url
+
     def fetch_stock(self) -> list[StockItem]:
-        self.page.click(IN_SEASON_MENU_LINK_SELECTOR)
-        self.page.wait_for_selector(
-            f"input[name='{PERIOD_1_START_DATE_FIELD}']",
-            state="attached",
-            timeout=ORDER_GRID_LOAD_TIMEOUT_MS,
-        )
-        return self._extract_stock_items_from_page()
+        items: list[StockItem] = []
+        for menu_link_selector in FETCH_STOCK_MENU_LINK_SELECTORS:
+            self.page.goto(self._menu_url)
+            self.page.click(menu_link_selector)
+            self.page.wait_for_selector(
+                f"input[name='{PERIOD_1_START_DATE_FIELD}']",
+                state="attached",
+                timeout=ORDER_GRID_LOAD_TIMEOUT_MS,
+            )
+            items.extend(self._extract_stock_items_from_page())
+        return items
 
     def generate_availability_report(
         self, input_csv: Path = DEVINCI_ITEMS_CSV
     ) -> list[dict]:
         """Produces the user's own report format: the input CSV's 3 columns
-        (System ID, Manufact. SKU, Description) plus Status/ETA,
-        expanded to one row per size for each matched SKU. Depends on
-        login() and fetch_stock(), neither of which has been confirmed
-        against the real live portal yet (see the class docstring) -
-        build_availability_report() has the matching/expansion logic and is
-        tested directly against fixture data, independent of the two.
+        (System ID, Manufact. SKU, Description) plus a parsed-out Size
+        column and Status/ETA, one output row per input row (see
+        build_availability_report()'s docstring for the (SKU, size)
+        matching this depends on). login() has been confirmed live by the
+        user; fetch_stock() is implemented but its Closeout+size-matching
+        fixes haven't been re-confirmed live yet (see the class docstring)
+        - build_availability_report() has the matching logic and is tested
+        directly against fixture data, independent of the two.
         """
         items = self.fetch_stock()
         rows = _load_devinci_items(input_csv)

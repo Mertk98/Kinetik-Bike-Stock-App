@@ -14,6 +14,7 @@ from kinetik_stock.scrapers import devinci as devinci_module
 from kinetik_stock.scrapers.devinci import (
     DevinciScraper,
     _load_devinci_items,
+    _parse_size_from_description,
     _report_status_and_eta,
     build_availability_report,
     split_description,
@@ -55,6 +56,28 @@ def test_split_description():
     # so this stays unsplit (confirmed real examples: "Bike Milano 2 AL13").
     assert split_description("No pipes here") == ("No pipes here", None)
     assert split_description("Bike Milano 2 AL13") == ("Bike Milano 2 AL13", None)
+
+
+def test_parse_size_from_description():
+    # Confirmed against the user's real 128-row inventory CSV: the size is
+    # the leading letters of the description's last token, not a separate
+    # column - covers every real shape seen (single wheel size, dual wheel
+    # size, and a decimal second wheel size).
+    assert _parse_size_from_description("Devinci Troy GX 12S Alien Blue S29") == "S"
+    assert _parse_size_from_description("Devinci E-Troy Bosch Deore 12S Black XL29") == "XL"
+    assert (
+        _parse_size_from_description("Devinci E-Troy Bosch GX 12S Green Gold M29/27") == "M"
+    )
+    assert _parse_size_from_description("Devinci Troy ST Deore Gloss Black Dust XS27") == "XS"
+    assert (
+        _parse_size_from_description("Devinci Spartan GX AXS Gloss Deep Olive S29/27.5")
+        == "S"
+    )
+    # "11S" mid-description must not be mistaken for a trailing size token.
+    assert _parse_size_from_description("Devinci Kobain Deore 11S Navy M29") == "M"
+    # No parseable trailing size token at all.
+    assert _parse_size_from_description("No size token here") is None
+    assert _parse_size_from_description("") is None
 
 
 def test_login_fills_credentials_and_confirms_via_logout_link(monkeypatch):
@@ -116,39 +139,39 @@ def test_login_raises_when_logged_in_selector_never_appears(monkeypatch):
             browser.close()
 
 
-def test_fetch_stock_clicks_in_season_link_and_scrapes_resulting_grid():
+def test_fetch_stock_scrapes_both_in_season_and_closeout_grids():
     # Exercises fetch_stock() end-to-end against the real confirmed
-    # Menu.aspx markup (the "In season" link's onclick Type= GUID) and the
-    # real grid fixture it lands on - see tests/fixtures/devinci_login/
-    # landing.html for how the click is simulated (a stand-in
-    # WebForm_DoPostBackWithOptions, not the real portal).
+    # Menu.aspx markup (each order type link's href Type= GUID) and both
+    # real grid fixtures it lands on in turn - see tests/fixtures/
+    # devinci_login/landing.html for how the clicks are simulated (a
+    # stand-in WebForm_DoPostBackWithOptions routing by GUID, not the real
+    # portal) and tests/fixtures/devinci_product/achats_treeview_closeout.html
+    # for the real Closeout SKU (FC22044-01) this confirms gets combined
+    # with the In Season grid's items - per the user, their real inventory
+    # has SKUs that only exist in Closeout, which is exactly what got
+    # missed before fetch_stock() scraped both.
     brand_config = make_brand_config()
+    menu_url = (
+        (Path(__file__).parent / "fixtures" / "devinci_login" / "landing.html")
+        .resolve()
+        .as_uri()
+    )
     with sync_playwright() as p:
         browser = launch_chromium(p, headless=True)
         try:
             scraper = DevinciScraper(brand_config, browser)
             try:
-                scraper.page.goto(
-                    (
-                        Path(__file__).parent
-                        / "fixtures"
-                        / "devinci_login"
-                        / "landing.html"
-                    )
-                    .resolve()
-                    .as_uri()
-                )
+                scraper._menu_url = menu_url
                 items = scraper.fetch_stock()
-                final_url = scraper.page.url
             finally:
                 scraper.close()
         finally:
             browser.close()
 
-    assert final_url.endswith("achats_treeview.html")
     skus = {i.sku for i in items}
-    assert "FV27122-21" in skus
-    assert "FE26100-11" in skus
+    assert "FV27122-21" in skus  # from the In Season grid fixture
+    assert "FE26100-11" in skus  # from the In Season grid fixture
+    assert "FC22044-01" in skus  # from the Closeout grid fixture
 
 
 def test_extract_stock_items_from_page_matches_real_grid_structure():
@@ -385,8 +408,10 @@ def test_report_status_and_eta_out_of_stock():
     assert _report_status_and_eta(item) == ("Out of Stock", "N/A")
 
 
-def test_build_availability_report_expands_one_row_per_size():
-    # Same shape as the real FV27105-32 example the user confirmed live.
+def test_build_availability_report_matches_by_sku_and_size():
+    # Real CSV shape (per the user's live run): one input row per SKU+size
+    # already, not one row per SKU to expand out - FV27105-32 here has 5
+    # separate rows, one per size, same as their real config/devinci_items.csv.
     items = [
         _make_item("FV27105-32", "XS", StockStatus.OUT_OF_STOCK, quantity=0),
         _make_item("FV27105-32", "S", StockStatus.IN_STOCK, quantity=9),
@@ -402,51 +427,96 @@ def test_build_availability_report_expands_one_row_per_size():
         {
             "system_id": "1",
             "manufacturer_sku": "FV27105-32",
-            "item_description": "Bike Spartan MX GX AXS Deep Olive",
+            "item_description": "Bike Spartan MX GX AXS Deep Olive XS29",
         },
-        {"system_id": "2", "manufacturer_sku": "", "item_description": "No Sku On File"},
+        {
+            "system_id": "2",
+            "manufacturer_sku": "FV27105-32",
+            "item_description": "Bike Spartan MX GX AXS Deep Olive S29",
+        },
         {
             "system_id": "3",
+            "manufacturer_sku": "FV27105-32",
+            "item_description": "Bike Spartan MX GX AXS Deep Olive M29",
+        },
+        {
+            "system_id": "4",
+            "manufacturer_sku": "FV27105-32",
+            "item_description": "Bike Spartan MX GX AXS Deep Olive L29",
+        },
+        {
+            "system_id": "5",
+            "manufacturer_sku": "FV27105-32",
+            "item_description": "Bike Spartan MX GX AXS Deep Olive XL29",
+        },
+        {"system_id": "6", "manufacturer_sku": "", "item_description": "No Sku On File M29"},
+        {
+            "system_id": "7",
             "manufacturer_sku": "NOT-FOUND-SKU",
-            "item_description": "Missing Bike",
+            "item_description": "Missing Bike S29",
+        },
+        {
+            "system_id": "8",
+            "manufacturer_sku": "FV27105-32",
+            "item_description": "No parseable size here",
         },
     ]
 
     report_rows = build_availability_report(items, rows)
 
-    matched = [r for r in report_rows if r["System ID"] == "1"]
-    assert [r["Description"] for r in matched] == [
-        "Bike Spartan MX GX AXS Deep Olive - XS",
-        "Bike Spartan MX GX AXS Deep Olive - S",
-        "Bike Spartan MX GX AXS Deep Olive - M",
-        "Bike Spartan MX GX AXS Deep Olive - L",
-        "Bike Spartan MX GX AXS Deep Olive - XL",
-    ]
-    assert [r["Status"] for r in matched] == [
+    # Exactly one output row per input row - not one per scraped size.
+    assert len(report_rows) == len(rows)
+
+    by_id = {r["System ID"]: r for r in report_rows}
+    assert (by_id["1"]["Size"], by_id["1"]["Status"], by_id["1"]["ETA"]) == (
+        "XS",
         "Out of Stock",
+        "N/A",
+    )
+    assert (by_id["2"]["Size"], by_id["2"]["Status"], by_id["2"]["ETA"]) == (
+        "S",
         "Available (9)",
+        "Now",
+    )
+    assert (by_id["3"]["Size"], by_id["3"]["Status"], by_id["3"]["ETA"]) == (
+        "M",
         "pre-order",
+        "2026-08-16",
+    )
+    assert (by_id["4"]["Size"], by_id["4"]["Status"], by_id["4"]["ETA"]) == (
+        "L",
         "pre-order",
+        "2026-08-16",
+    )
+    assert (by_id["5"]["Size"], by_id["5"]["Status"], by_id["5"]["ETA"]) == (
+        "XL",
         "Available (5)",
-    ]
-    assert [r["ETA"] for r in matched] == ["N/A", "Now", "2026-08-16", "2026-08-16", "Now"]
+        "Now",
+    )
+    # Descriptions are passed through as-is now (they already carry their
+    # own size), not rewritten with a "- SIZE" suffix.
+    assert by_id["1"]["Description"] == "Bike Spartan MX GX AXS Deep Olive XS29"
 
     # No Manufacturer SKU on file at all is treated as discontinued (per
-    # the user), and isn't expanded/appended since there's nothing to
-    # look up.
-    no_sku = next(r for r in report_rows if r["System ID"] == "2")
-    assert (no_sku["Status"], no_sku["ETA"]) == ("Discontinued", "N/A")
-    assert no_sku["Description"] == "No Sku On File"
+    # the user).
+    assert (by_id["6"]["Status"], by_id["6"]["ETA"]) == ("Discontinued", "N/A")
+    assert by_id["6"]["Size"] == "M"
 
-    not_found = next(r for r in report_rows if r["System ID"] == "3")
-    assert (not_found["Status"], not_found["ETA"]) == ("N/A", "N/A")
+    # SKU present but not in the scraped catalog at all.
+    assert (by_id["7"]["Status"], by_id["7"]["ETA"]) == ("N/A", "N/A")
+
+    # SKU present and scraped, but this row's own description has no
+    # parseable size suffix - can't match a specific size, so N/A rather
+    # than guessing.
+    assert (by_id["8"]["Status"], by_id["8"]["ETA"], by_id["8"]["Size"]) == ("N/A", "N/A", "")
 
 
-def test_generate_availability_report_uses_fetch_stock_and_expands_sizes(tmp_path, monkeypatch):
+def test_generate_availability_report_uses_fetch_stock_and_matches_size(tmp_path, monkeypatch):
     csv_path = tmp_path / "devinci_items.csv"
     csv_path.write_text(
         "System ID,Manufact. SKU,Description\n"
-        "1,FV27105-32,Bike Spartan MX GX AXS Deep Olive\n"
+        "1,FV27105-32,Bike Spartan MX GX AXS Deep Olive S29\n"
+        "2,FV27105-32,Bike Spartan MX GX AXS Deep Olive XL29\n"
     )
 
     fake_items = [

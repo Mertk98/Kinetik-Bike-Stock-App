@@ -47,23 +47,25 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled - login() and fetch_stock() are both now implemented against
-  # real captured portal pages (see scrapers/devinci.py and
-  # tests/fixtures/devinci_login/, devinci_product/), but this sandbox's
-  # network policy blocks outbound access to transac.devinci.com entirely,
-  # so neither has ever actually been run live. Flip to enabled: true only
-  # once a real live run confirms both work end-to-end - login's own
-  # "logged in" check and fetch_stock()'s menu-link click were built from
-  # a real captured Menu.aspx, but that's not the same as having actually
-  # run them.
+  # Disabled - login() has been confirmed working live by the user (this
+  # sandbox itself still can't reach transac.devinci.com to verify
+  # anything - network policy). That same live run surfaced two real bugs,
+  # both now fixed (see scrapers/devinci.py): fetch_stock() only scraped
+  # the In Season grid, missing SKUs that only exist in Closeout, and
+  # build_availability_report() matched by SKU alone instead of (SKU,
+  # size), expanding every input row to every scraped size of its SKU and
+  # producing hundreds of duplicate rows against the user's real CSV
+  # (which turned out to already be one row per SKU+size, not one row per
+  # SKU). Flip to enabled: true once the user re-runs this live and
+  # confirms both fixes actually solved it.
   # The grid's own row/cell parsing IS confirmed against real portal HTML
   # for both order types the user has captured (In Season, Closeout) -
   # _extract_stock_items_from_page(), tested against
-  # tests/fixtures/devinci_product/achats_treeview.html plus a synthetic
-  # page built from confirmed Closeout markup in tests/test_devinci.py.
-  # Two more order types are known to exist from the real Menu.aspx (Parts,
-  # Rental Orders) but their own grid HTML hasn't been captured, so it's
-  # not confirmed they share the same RadGrid1 layout.
+  # tests/fixtures/devinci_product/achats_treeview.html and
+  # achats_treeview_closeout.html. Two more order types are known to exist
+  # from the real Menu.aspx (Parts, Rental Orders) but their own grid HTML
+  # hasn't been captured, so it's not confirmed they share the same
+  # RadGrid1 layout, and fetch_stock() doesn't scrape them.
   - key: devinci
     name: "Devinci"
     portal_url: "https://transac.devinci.com/"
