@@ -1,17 +1,43 @@
 <!--
-Stand-in for whatever page transac.devinci.com actually lands on right
-after a successful login - that page itself hasn't been captured, so its
-real markup is unconfirmed (see devinci.py's LOGGED_IN_SELECTOR comment).
-This fixture only reproduces the one confirmed element login() checks for:
-a "LOGOUT" link/control with id="cmdFermer", copied verbatim from the real
-captured order-grid pages (Achats_Treeview.aspx, both order types), where
-it reads:
-  <a onclick="Logout();" id="cmdFermer" class="Langue"
-     href="javascript:__doPostBack('cmdFermer','')">LOGOUT</a>
+Trimmed copy of the real Menu.aspx page - the confirmed post-login landing
+page on transac.devinci.com, pasted directly by the user from a live
+session. Kept verbatim: the "LOGOUT" link (id="cmdFermer", what login()
+waits for), and the order-type menu links with their real href
+attributes, including the real Type= GUIDs baked into each one's target
+Achats_Treeview.aspx URL (as a "javascript:WebForm_DoPostBackWithOptions(
+...)" string) - IN_SEASON_MENU_LINK_SELECTOR in devinci.py matches on
+that GUID substring within href, not link text, specifically because of
+the second "IN SEASON(closed)" link below (a distinct, non-navigating
+control - confirmed real, no Type= GUID in its href at all).
+
+The real menu links call new WebForm_PostBackOptions(...) and
+WebForm_DoPostBackWithOptions(...), both functions the real ASP.NET/
+Telerik runtime provides (via WebResource.axd scripts not included here).
+The stand-in implementations of them below are NOT part of the real page -
+they exist only so this fixture can be clicked through to a destination
+page, the same idea as tests/fixtures/example_b2b/login.html.
+It always navigates to the devinci_product fixture (a stand-in for whatever
+real Achats_Treeview.aspx grid the click would normally reach), regardless
+of which real actionUrl was passed in - fetch_stock()'s tests only need to
+confirm the click lands somewhere with the confirmed grid's own fields.
 -->
 <html>
 <head><meta charset="utf-8"></head>
 <body>
-<a onclick="Logout();" id="cmdFermer" class="Langue" href="javascript:__doPostBack('cmdFermer','')">LOGOUT</a>
+<a id="cmdFermer" class="Roboto-Regular-Blanc" href="javascript:__doPostBack('cmdFermer','')">LOGOUT</a>
+
+<table id="tblCommander">
+<tr><td><a class="Roboto-Regular-Noir" href="javascript:__doPostBack('ctl41','')">IN SEASON(closed)</a></td></tr>
+<tr><td><a onclick="skm_LockScreen('One moment please ...');" class="Roboto-Regular-Noir" href="javascript:WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions(&quot;ctl44&quot;, &quot;&quot;, false, &quot;&quot;, &quot;Achats_Treeview.aspx?no=972838468111874&amp;Type=D17A9733897C4B088F16E046997B00B6&quot;, false, true))">In season</a></td></tr>
+<tr><td><a onclick="skm_LockScreen('One moment please ...');" class="Roboto-Regular-Rouge" href="javascript:WebForm_DoPostBackWithOptions(new WebForm_PostBackOptions(&quot;ctl47&quot;, &quot;&quot;, false, &quot;&quot;, &quot;Achats_Treeview.aspx?no=972838468111874&amp;Type=78A8E3551F714CD1A68AF58EDAA50E8C&quot;, false, true))">Closeout</a></td></tr>
+</table>
+
+<script>
+function skm_LockScreen() {}
+function WebForm_PostBackOptions() {}
+function WebForm_DoPostBackWithOptions(options) {
+  window.location.href = "../devinci_product/achats_treeview.html";
+}
+</script>
 </body>
 </html>

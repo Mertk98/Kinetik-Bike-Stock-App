@@ -23,14 +23,43 @@ logger = logging.getLogger(__name__)
 USERNAME_SELECTOR = "#txtLogin"
 PASSWORD_SELECTOR = "#txtPassword"
 LOGIN_BUTTON_SELECTOR = "#cmdLogin"
-# Confirmed present on both real captured post-login pages (the In Season
-# and Closeout order grids): a "LOGOUT" link, id="cmdFermer". NOT confirmed
-# on whatever page login() itself lands on right after submitting - that
-# depends on the still-unverified post-login navigation (see fetch_stock()
-# and the class docstring) - so this assumes it's part of a shared
-# authenticated-pages header rather than something specific to the grid.
+# Confirmed against a real captured post-login page (Menu.aspx, pasted from
+# a live session): a "LOGOUT" link, id="cmdFermer" - this IS the page
+# login() itself lands on right after submitting, not just an assumption
+# carried over from the order-grid pages (which also have it).
 LOGGED_IN_SELECTOR = "#cmdFermer"
 LOGGED_IN_CHECK_TIMEOUT_MS = 15000
+
+# Confirmed against that same real Menu.aspx capture: the landing page's own
+# URL/form action already carries a per-session "no=" value (e.g.
+# "Menu.aspx?no=972838468111874") - it's assigned once at login, not
+# discovered via some other page. The menu then links to each order type's
+# Achats_Treeview.aspx grid by reusing that exact same no= alongside a
+# fixed, order-type-specific Type= GUID (In Season and Closeout confirmed
+# to match the GUIDs already recorded from captured grid pages; Parts and
+# Rental Orders are new - their own grid HTML hasn't been captured, so
+# their layout isn't confirmed to match). This resolves the previous
+# uncertainty about no= and about whether Menu.aspx was a required
+# intermediate step - it is.
+IN_SEASON_TYPE_GUID = "D17A9733897C4B088F16E046997B00B6"
+CLOSEOUT_TYPE_GUID = "78A8E3551F714CD1A68AF58EDAA50E8C"
+PARTS_TYPE_GUID = "7DB3E2BE432C441E8D46167CFDBB1FD9"
+RENTAL_ORDERS_TYPE_GUID = "561820CE46BC40A0A7DE2CEB0372A8B7"
+
+# Confirmed: each menu link's href fires WebForm_DoPostBackWithOptions(...)
+# with the target Achats_Treeview.aspx URL (no=/Type=) baked into that href
+# as a literal "javascript:..." string (onclick on the same link is just
+# skm_LockScreen(...), an unrelated loading-overlay effect) - fetch_stock()
+# below just clicks it and lets the real page handle the postback/
+# navigation, rather than trying to construct and GET that URL directly
+# (untested whether that would even work, since the real link submits a
+# POST carrying Menu.aspx's own viewstate/eventtarget). Matching by href
+# substring rather than link text also confirmed necessary: there's a
+# second, differently-cased "IN SEASON(closed)" link (a distinct,
+# non-navigating control, no Type= GUID in its href at all) that a
+# text-based selector could collide with.
+IN_SEASON_MENU_LINK_SELECTOR = f"a[href*='{IN_SEASON_TYPE_GUID}']"
+ORDER_GRID_LOAD_TIMEOUT_MS = 15000
 
 # Confirmed against a real order/booking page (Achats_Treeview.aspx, "In
 # Season" order type) pasted directly from a live dealer session. Devinci's
@@ -258,29 +287,20 @@ class DevinciScraper(BaseScraper):
     product-page link) - both share the id suffix "_MyHyperlink", which is
     what description_el is now matched on below instead of a class name.
 
-    login() is now implemented against a real captured login page (see the
-    module-level selector comments above) - a plain 2-field ASP.NET
-    WebForms form (txtLogin/txtPassword/cmdLogin), unlike Norco's 3-field
-    one. It could not be run live from this sandbox (network policy blocks
-    transac.devinci.com), so it's implemented from the captured HTML but
-    its "logged in" check (waiting for #cmdFermer) is an assumption -
-    confirmed present on the post-login grid pages, not confirmed on
-    whatever page comes immediately after submitting login.
+    login() is implemented against a real captured login page - a plain
+    2-field ASP.NET WebForms form (txtLogin/txtPassword/cmdLogin), unlike
+    Norco's 3-field one. fetch_stock() is implemented against a real
+    captured Menu.aspx (the confirmed post-login landing page): it clicks
+    the "In season" link (matched by its onclick's Type= GUID, see
+    IN_SEASON_MENU_LINK_SELECTOR above) and waits for the resulting order
+    grid to load, then reuses _extract_stock_items_from_page(). Neither
+    could be run live from this sandbox (network policy blocks
+    transac.devinci.com entirely), so both are implemented from captured
+    HTML and their own local fixture tests, not confirmed end-to-end
+    against the real portal yet.
 
-    UNVERIFIED and NOT implemented:
-      - fetch_stock()'s navigation path from wherever login() lands to an
-        order grid: the grid's own URL (Achats_Treeview.aspx?no=<order id>
-        &Type=<order type guid>) has session-specific query params that get
-        generated per order instance, not a fixed URL reachable right
-        after login - confirmed by 4 different real no= values seen across
-        separate sessions/order types. There's also a Menu.aspx?no=<order
-        id> page that the user's "In Season" link stopped at rather than
-        reaching Achats_Treeview.aspx directly (unlike their "Closeout"
-        link) - whether that's a required intermediate step or just where
-        they happened to copy the URL from is unconfirmed.
-
-    Keep `enabled: false` in config/brands.yaml until the above is
-    confirmed against the real portal.
+    Keep `enabled: false` in config/brands.yaml until a real live run
+    confirms both login() and fetch_stock() actually work end-to-end.
 
     generate_availability_report() reproduces the user's own report format
     (System ID, Manufact. SKU, Description, Status, ETA), like
@@ -306,14 +326,13 @@ class DevinciScraper(BaseScraper):
             )
 
     def fetch_stock(self) -> list[StockItem]:
-        raise NotImplementedError(
-            f"{self.brand_config.name} fetch_stock() navigation is "
-            "unverified - there's no confirmed path from the post-login "
-            "landing page to the order/booking grid (Achats_Treeview.aspx), "
-            "whose URL carries session-specific no=/Type= query params. "
-            "_extract_stock_items_from_page() below is confirmed against the "
-            "real grid HTML once a page is already on it."
+        self.page.click(IN_SEASON_MENU_LINK_SELECTOR)
+        self.page.wait_for_selector(
+            f"input[name='{PERIOD_1_START_DATE_FIELD}']",
+            state="attached",
+            timeout=ORDER_GRID_LOAD_TIMEOUT_MS,
         )
+        return self._extract_stock_items_from_page()
 
     def generate_availability_report(
         self, input_csv: Path = DEVINCI_ITEMS_CSV
@@ -321,9 +340,10 @@ class DevinciScraper(BaseScraper):
         """Produces the user's own report format: the input CSV's 3 columns
         (System ID, Manufact. SKU, Description) plus Status/ETA,
         expanded to one row per size for each matched SKU. Depends on
-        fetch_stock(), so it can't run end-to-end until that's confirmed
-        (see the class docstring) - build_availability_report() has the
-        matching/expansion logic and is tested directly against fixture data.
+        login() and fetch_stock(), neither of which has been confirmed
+        against the real live portal yet (see the class docstring) -
+        build_availability_report() has the matching/expansion logic and is
+        tested directly against fixture data, independent of the two.
         """
         items = self.fetch_stock()
         rows = _load_devinci_items(input_csv)

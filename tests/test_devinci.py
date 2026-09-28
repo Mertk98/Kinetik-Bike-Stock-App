@@ -116,19 +116,39 @@ def test_login_raises_when_logged_in_selector_never_appears(monkeypatch):
             browser.close()
 
 
-def test_fetch_stock_is_unverified():
+def test_fetch_stock_clicks_in_season_link_and_scrapes_resulting_grid():
+    # Exercises fetch_stock() end-to-end against the real confirmed
+    # Menu.aspx markup (the "In season" link's onclick Type= GUID) and the
+    # real grid fixture it lands on - see tests/fixtures/devinci_login/
+    # landing.html for how the click is simulated (a stand-in
+    # WebForm_DoPostBackWithOptions, not the real portal).
     brand_config = make_brand_config()
     with sync_playwright() as p:
         browser = launch_chromium(p, headless=True)
         try:
             scraper = DevinciScraper(brand_config, browser)
             try:
-                with pytest.raises(NotImplementedError):
-                    scraper.fetch_stock()
+                scraper.page.goto(
+                    (
+                        Path(__file__).parent
+                        / "fixtures"
+                        / "devinci_login"
+                        / "landing.html"
+                    )
+                    .resolve()
+                    .as_uri()
+                )
+                items = scraper.fetch_stock()
+                final_url = scraper.page.url
             finally:
                 scraper.close()
         finally:
             browser.close()
+
+    assert final_url.endswith("achats_treeview.html")
+    skus = {i.sku for i in items}
+    assert "FV27122-21" in skus
+    assert "FE26100-11" in skus
 
 
 def test_extract_stock_items_from_page_matches_real_grid_structure():
