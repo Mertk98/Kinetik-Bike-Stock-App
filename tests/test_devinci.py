@@ -14,6 +14,7 @@ from kinetik_stock.scrapers import devinci as devinci_module
 from kinetik_stock.scrapers.devinci import (
     DevinciScraper,
     _closest_schedule_date,
+    _decode_response_body,
     _load_devinci_items,
     _parse_size_from_description,
     _report_status_and_eta,
@@ -264,6 +265,59 @@ def test_closest_schedule_date_returns_none_when_no_dates():
     assert _closest_schedule_date("<table><tr><td>No batches scheduled</td></tr></table>") is None
 
 
+def test_decode_response_body_falls_back_to_windows_1252():
+    # Confirmed live: Achats_Cedule.aspx's response body has raw
+    # Windows-1252 bytes for accented characters (e.g. b"\xe9" for "é" in
+    # "Livraison prévue") with no charset in its Content-Type header -
+    # decoding it as UTF-8 (as Playwright's own response.text() does)
+    # raises UnicodeDecodeError, which is exactly what broke the live run.
+    body = "Livraison prévue".encode("cp1252")
+    assert _decode_response_body(body, "text/html") == "Livraison prévue"
+
+
+def test_decode_response_body_prefers_declared_charset():
+    body = "Livraison prévue".encode("cp1252")
+    assert (
+        _decode_response_body(body, "text/html; charset=windows-1252")
+        == "Livraison prévue"
+    )
+
+
+def test_decode_response_body_handles_real_utf8():
+    body = "Livraison prévue".encode("utf-8")
+    assert _decode_response_body(body, "text/html; charset=utf-8") == "Livraison prévue"
+
+
+def test_fetch_closest_schedule_date_decodes_windows_1252_response(monkeypatch):
+    # Regression test for the live UnicodeDecodeError: the real response
+    # isn't UTF-8, so the fetch must not crash (or silently mis-parse) on
+    # non-UTF-8 bytes in its body.
+    onmouseover = "OuvrirPopUp_Cedule(event,'FE26100322','MTL','CAN','desc','REPEAT')"
+
+    class FakeResponse:
+        ok = True
+        headers = {"content-type": "text/html"}
+
+        def body(self):
+            return "<td>Livraison prévue: 2027-01-05</td>".encode("cp1252")
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = DevinciScraper(brand_config, browser)
+            try:
+                scraper.page.goto(FIXTURE_PAGE)
+                monkeypatch.setattr(scraper.page.request, "get", lambda url: FakeResponse())
+                result = scraper._fetch_closest_schedule_date(onmouseover)
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    assert result == "2027-01-05"
+
+
 def test_fetch_closest_schedule_date_builds_url_and_parses_response(monkeypatch):
     # Confirmed against a real captured request/response pair: hovering a
     # cell calls OuvrirPopUp_Cedule(event, MyItem, whse, eut, desc, type),
@@ -276,9 +330,10 @@ def test_fetch_closest_schedule_date_builds_url_and_parses_response(monkeypatch)
 
     class FakeResponse:
         ok = True
+        headers = {"content-type": "text/html; charset=utf-8"}
 
-        def text(self):
-            return "<table><tr><td>2027-05-06</td></tr><tr><td>2027-01-05</td></tr></table>"
+        def body(self):
+            return b"<table><tr><td>2027-05-06</td></tr><tr><td>2027-01-05</td></tr></table>"
 
     captured_urls = []
 
@@ -319,9 +374,10 @@ def test_fetch_closest_schedule_date_returns_none_on_non_ok_response(monkeypatch
     class FakeResponse:
         ok = False
         status = 500
+        headers = {}
 
-        def text(self):
-            return "Internal Server Error"
+        def body(self):
+            return b"Internal Server Error"
 
     brand_config = make_brand_config()
     with sync_playwright() as p:

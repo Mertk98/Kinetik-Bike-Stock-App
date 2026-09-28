@@ -150,6 +150,29 @@ def _closest_schedule_date(html: str) -> Optional[str]:
     dates = SCHEDULE_DATE_RE.findall(html)
     return min(dates) if dates else None
 
+
+CHARSET_RE = re.compile(r"charset=([\w-]+)", re.IGNORECASE)
+
+
+def _decode_response_body(body: bytes, content_type: str) -> str:
+    # Confirmed live: Achats_Cedule.aspx's response isn't UTF-8 (it has raw
+    # Windows-1252 bytes for accented French characters, e.g. \xe9 for
+    # "é") - unlike the main app pages, which do declare UTF-8. Playwright's
+    # response.text() always assumes UTF-8 and raises UnicodeDecodeError on
+    # it, so this decodes the raw bytes ourselves: try the server-declared
+    # charset if any, then UTF-8, then Windows-1252 (the common default for
+    # legacy ASP.NET sites), falling back to lossy UTF-8 as a last resort.
+    charset_match = CHARSET_RE.search(content_type)
+    candidates = [charset_match.group(1)] if charset_match else []
+    candidates += ["utf-8", "cp1252"]
+    for encoding in candidates:
+        try:
+            return body.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return body.decode("utf-8", errors="replace")
+
+
 SIZE_ORDER = ["XS", "S", "M", "L", "XL"]
 
 # Confirmed against a fuller real capture (84 SKUs / 420 size-rows, not just
@@ -570,6 +593,9 @@ class DevinciScraper(BaseScraper):
         url = urljoin(self.page.url, PRODUCTION_SCHEDULE_PATH) + "?" + query
         try:
             response = self.page.request.get(url)
+            body_text = _decode_response_body(
+                response.body(), response.headers.get("content-type", "")
+            )
         except Exception as exc:
             logger.warning("Couldn't fetch production schedule from %s: %r", url, exc)
             return None
@@ -579,8 +605,8 @@ class DevinciScraper(BaseScraper):
                 "Production schedule fetch got HTTP %s from %s: %.200r",
                 response.status,
                 url,
-                response.text(),
+                body_text,
             )
             return None
 
-        return _closest_schedule_date(response.text())
+        return _closest_schedule_date(body_text)
