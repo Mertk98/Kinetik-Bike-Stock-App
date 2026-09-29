@@ -47,21 +47,20 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled - login() has been confirmed working live by the user (this
-  # sandbox itself still can't reach transac.devinci.com to verify
-  # anything - network policy). That same live run surfaced three real
-  # bugs, all now fixed (see scrapers/devinci.py): fetch_stock() only
-  # scraped the In Season grid, missing SKUs that only exist in Closeout;
-  # build_availability_report() matched by SKU alone instead of (SKU,
-  # size), expanding every input row to every scraped size of its SKU and
-  # producing hundreds of duplicate rows against the user's real CSV
-  # (which turned out to already be one row per SKU+size, not one row per
-  # SKU); and PRE_ORDER items' ETA used a single page-wide "future
-  # production" start date instead of each size's own real production
-  # schedule - fixed by fetching Achats_Cedule.aspx per (SKU, size) (the
-  # same request the real page makes on hover) and reporting the closest
-  # of its possibly-multiple dates. Flip to enabled: true once the user
-  # re-runs this live and confirms all three fixes actually solved it.
+  # Confirmed working end-to-end by the user against a real live login and
+  # scrape (this sandbox itself still can't reach transac.devinci.com to
+  # verify anything directly - network policy). Four real bugs surfaced
+  # and got fixed across several live-test rounds (see scrapers/devinci.py):
+  # fetch_stock() only scraped the In Season grid, missing SKUs that only
+  # exist in Closeout; build_availability_report() matched by SKU alone
+  # instead of (SKU, size), producing hundreds of duplicate rows;
+  # PRE_ORDER items' ETA used a single page-wide "future production" start
+  # date instead of each size's own real production schedule (fixed by
+  # fetching Achats_Cedule.aspx per (SKU, size), the same request the real
+  # page makes on hover, and reporting the closest of its possibly-multiple
+  # dates); and that fetch initially crashed the whole run with a
+  # UnicodeDecodeError because Playwright's response.text() assumes UTF-8
+  # but that endpoint's response is actually Windows-1252-encoded.
   # The grid's own row/cell parsing IS confirmed against real portal HTML
   # for both order types the user has captured (In Season, Closeout) -
   # _extract_stock_items_from_page(), tested against
@@ -76,7 +75,7 @@ brands:
     scraper: "kinetik_stock.scrapers.devinci.DevinciScraper"
     username_env: "DEVINCI_USERNAME"
     password_env: "DEVINCI_PASSWORD"
-    enabled: false
+    enabled: true
 
   # Confirmed working end-to-end against a real live login (search ->
   # click-through -> product page -> stock/status/ETA extraction), including
