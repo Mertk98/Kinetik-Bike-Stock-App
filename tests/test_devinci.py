@@ -625,8 +625,9 @@ def _make_item(sku, size, status, quantity=None, eta_date=None) -> StockItem:
 
 
 def test_report_status_and_eta_in_stock():
+    # Per the user: an available item doesn't need its stock count shown.
     item = _make_item("SKU", "M", StockStatus.IN_STOCK, quantity=9)
-    assert _report_status_and_eta(item) == ("Available (9)", "Now")
+    assert _report_status_and_eta(item) == ("Available", "Now")
 
 
 def test_report_status_and_eta_pre_order():
@@ -706,7 +707,7 @@ def test_build_availability_report_matches_by_sku_and_size():
     )
     assert (by_id["2"]["Size"], by_id["2"]["Status"], by_id["2"]["ETA"]) == (
         "S",
-        "Available (9)",
+        "Available",
         "Now",
     )
     assert (by_id["3"]["Size"], by_id["3"]["Status"], by_id["3"]["ETA"]) == (
@@ -721,7 +722,7 @@ def test_build_availability_report_matches_by_sku_and_size():
     )
     assert (by_id["5"]["Size"], by_id["5"]["Status"], by_id["5"]["ETA"]) == (
         "XL",
-        "Available (5)",
+        "Available",
         "Now",
     )
     # Descriptions are passed through as-is now (they already carry their
@@ -768,4 +769,4 @@ def test_generate_availability_report_uses_fetch_stock_and_matches_size(tmp_path
         finally:
             browser.close()
 
-    assert [r["Status"] for r in rows] == ["Available (9)", "Available (5)"]
+    assert [r["Status"] for r in rows] == ["Available", "Available"]

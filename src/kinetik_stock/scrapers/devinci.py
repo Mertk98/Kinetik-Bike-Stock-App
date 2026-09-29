@@ -267,12 +267,11 @@ def write_devinci_report_csv(rows: list[dict], output_path: Path) -> None:
 def _report_status_and_eta(item: StockItem) -> tuple[str, str]:
     """Formats a scraped StockItem into the same wording style as Norco's
     own report (_report_status_and_eta in norco.py), for consistency across
-    the user's per-brand reports. Unlike Norco, Devinci's quantity is never
-    capped (onchange gives the real count, not a "10+" display value), so
-    the exact number is always shown.
+    the user's per-brand reports. Per the user, an available item's exact
+    stock count isn't needed in the report - just that it's available now.
     """
     if item.status == StockStatus.IN_STOCK:
-        return f"Available ({item.quantity})", "Now"
+        return "Available", "Now"
     if item.status == StockStatus.PRE_ORDER:
         return "pre-order", item.eta_date or "N/A"
     return "Out of Stock", "N/A"
