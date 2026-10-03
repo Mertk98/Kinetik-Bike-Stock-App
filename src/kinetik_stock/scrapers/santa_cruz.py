@@ -8,7 +8,7 @@ from kinetik_stock.scrapers.base import BaseScraper
 logger = logging.getLogger(__name__)
 
 # Confirmed against the real login page HTML, pasted by the user from a live
-# session at https://vip.santacruzbicycles.com/login/ - an SAP Commerce
+# session at https://vip.santacruzbicycles.com/login - an SAP Commerce
 # Cloud / Spartacus Angular storefront (cx-storefront, cx-page-layout, etc.).
 # The same app also serves Cervelo's B2B portal off a shared brand switcher
 # in the header, per that page's own markup - unrelated to this scraper, but

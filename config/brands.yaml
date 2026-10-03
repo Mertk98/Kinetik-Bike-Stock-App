@@ -54,7 +54,7 @@ brands:
   # stock/availability page has been captured yet. See scrapers/santa_cruz.py.
   - key: santa_cruz
     name: "Santa Cruz Bicycles"
-    portal_url: "https://vip.santacruzbicycles.com/login/"
+    portal_url: "https://vip.santacruzbicycles.com/login"
     scraper: "kinetik_stock.scrapers.santa_cruz.SantaCruzScraper"
     username_env: "SANTA_CRUZ_USERNAME"
     password_env: "SANTA_CRUZ_PASSWORD"
