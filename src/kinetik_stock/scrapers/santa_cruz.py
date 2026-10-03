@@ -38,6 +38,34 @@ LOGIN_BUTTON_SELECTOR = "scb-login-form button[type='submit']"
 LOGGED_IN_SELECTOR = "#navHeading"
 LOGGED_IN_CHECK_TIMEOUT_MS = 15000
 
+# Confirmed against a real captured Quick Order page
+# (vip.santacruzbicycles.com/my-account/quick-order, linked from the
+# post-login nav's SiteLinks slot as href="/my-account/quick-order" - no
+# trailing slash, unlike that page's own <link rel="canonical"> tag, which
+# turned out to be wrong for the login page too). Per the user, this is how
+# dealer stock/ETA is checked: type a part number into the search box and
+# press Enter (no dropdown-result click needed) to add it as a row; repeat
+# per SKU, up to the page's own stated limit of 20 at a time (confirmed by
+# the page's own "You can add up to 20 products at a time" text); a SKU
+# that's discontinued or out of stock with no ETA shows a warning instead of
+# being added. Then "Add to cart" navigates to the real cart page, where
+# each line's "EST. Shipment QTY" field holds the ETA - a week or less out
+# means available now, more than a week out means pre-order (per the user).
+QUICK_ORDER_PAGE_URL = "https://vip.santacruzbicycles.com/my-account/quick-order"
+QUICK_ORDER_SEARCH_INPUT_SELECTOR = "input[formcontrolname='product']"
+ADD_TO_CART_BUTTON_SELECTOR = "button[aria-label='Add to cart']"
+MAX_ITEMS_PER_QUICK_ORDER_BATCH = 20
+
+# UNCONFIRMED - still needed to finish fetch_stock():
+# - The quick-order-table row's HTML once a part number is successfully
+#   added (to read back SKU/name/price and confirm it matches what was
+#   typed).
+# - The warning message's exact HTML/text for a skipped (discontinued or
+#   OOS-with-no-ETA) part number, to tell that case apart from a real match.
+# - The cart page's HTML, specifically the "EST. Shipment QTY" field's
+#   markup per line (plain text? a date? a table?) and the "Clear Cart"
+#   button's selector.
+
 
 class SantaCruzScraper(BaseScraper):
     """Scraper for Santa Cruz Bicycles' B2B dealer portal
@@ -45,11 +73,11 @@ class SantaCruzScraper(BaseScraper):
     storefront.
 
     login() is confirmed against real captured login and post-login pages.
-    fetch_stock() is fully unimplemented - no stock/availability page has
-    been captured yet (the account flyout's "Quick Order" and various
-    report links - open orders, shipments, price sheets, booking program -
-    are known to exist from the post-login page's own nav, but which one(s)
-    hold per-SKU availability/ETA isn't confirmed yet).
+    fetch_stock() is fully unimplemented - the Quick Order page's search
+    input, 20-item batch limit, and Add to cart button are confirmed (see
+    QUICK_ORDER_PAGE_URL above), but the row/warning markup and the cart
+    page's "EST. Shipment QTY" field aren't captured yet, so there's nothing
+    to parse a real ETA from.
     """
 
     def login(self) -> None:
@@ -71,6 +99,8 @@ class SantaCruzScraper(BaseScraper):
 
     def fetch_stock(self) -> list[StockItem]:
         raise NotImplementedError(
-            "Santa Cruz scraper not implemented yet - need a real stock/"
-            "availability page capture from the dealer portal."
+            "Santa Cruz fetch_stock() not implemented yet - the Quick Order "
+            "page's search/add-to-cart flow is confirmed, but the added-row "
+            "markup, the skipped-item warning, and the cart page's EST. "
+            "Shipment QTY field all still need a real capture."
         )
