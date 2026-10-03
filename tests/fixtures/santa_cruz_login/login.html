@@ -1,0 +1,27 @@
+<!--
+Trimmed copy of the real Santa Cruz B2B login page
+(vip.santacruzbicycles.com/login/), pasted by the user from a live session -
+an SAP Commerce Cloud / Spartacus Angular storefront. Kept verbatim: the
+username/password input names/types and the submit button inside
+scb-login-form (login()'s USERNAME_SELECTOR/PASSWORD_SELECTOR/
+LOGIN_BUTTON_SELECTOR). The real Angular form machinery (reactive form
+validation, the CSRF-token POST to api-vip.santacruzbicycles.com) isn't
+reproduced here - same idea as every other login fixture in this project -
+just a stand-in onclick that simulates a successful login by navigating to
+landing.html, so login()'s fill+click+wait-for-selector flow can be
+exercised end to end without needing a real Angular runtime.
+-->
+<html><head><meta charset="utf-8"></head>
+<body>
+<scb-login-form class="user-form">
+  <form novalidate method="POST" action="https://api-vip.santacruzbicycles.com/authorizationserver/login">
+    <div class="login-form-input">
+      <input type="email" formcontrolname="userId" name="username" class="form-control" placeholder="Username">
+    </div>
+    <div class="login-form-input">
+      <input type="password" formcontrolname="password" name="password" class="form-control" placeholder="Password">
+    </div>
+    <button type="submit" class="btn btn-block btn-primary" onclick="event.preventDefault(); window.location.href='landing.html';"> Sign In </button>
+  </form>
+</scb-login-form>
+</body></html>

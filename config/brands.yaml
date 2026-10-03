@@ -47,12 +47,11 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled - login()'s field fill/submit is confirmed against a real
-  # captured login page (an SAP Commerce Cloud / Spartacus storefront), but
-  # it still raises NotImplementedError before returning: there's no
-  # confirmed way yet to tell a successful login from a failed one, and
-  # fetch_stock() is fully unimplemented (no stock page captured yet). See
-  # scrapers/santa_cruz.py.
+  # Disabled - login() is confirmed against real captured login and
+  # post-login pages (an SAP Commerce Cloud / Spartacus storefront), but
+  # hasn't been run live yet (this sandbox can't reach
+  # vip.santacruzbicycles.com). fetch_stock() is fully unimplemented - no
+  # stock/availability page has been captured yet. See scrapers/santa_cruz.py.
   - key: santa_cruz
     name: "Santa Cruz Bicycles"
     portal_url: "https://vip.santacruzbicycles.com/login/"

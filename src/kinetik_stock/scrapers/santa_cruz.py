@@ -27,12 +27,15 @@ PASSWORD_SELECTOR = "input[name='password']"
 # more of it is captured.
 LOGIN_BUTTON_SELECTOR = "scb-login-form button[type='submit']"
 
-# UNCONFIRMED - no real post-login capture yet. Need to know what a
-# successful sign-in actually does: does it redirect to a specific URL, or
-# does some element appear/disappear (e.g. the header's SiteLogin slot -
-# currently an empty <scb-login> in the logged-out capture - switching to an
-# account name/logout link)? Filled in once the user pastes that capture.
-LOGGED_IN_SELECTOR = None
+# Confirmed against a real post-login Homepage capture: the logged-out login
+# page has an entirely empty <scb-login></scb-login> in the header's
+# SiteLogin slot, while the logged-in Homepage has it filled in with an
+# account flyout menu whose always-visible heading is "Welcome, <name>"
+# (id="navHeading") - the dropdown under it (which has the "/logout" Sign
+# Out link) only becomes visible on hover per the page's own CSS, so
+# #navHeading is used instead of that link: it's already visible without
+# needing to simulate a hover interaction.
+LOGGED_IN_SELECTOR = "#navHeading"
 LOGGED_IN_CHECK_TIMEOUT_MS = 15000
 
 
@@ -41,11 +44,12 @@ class SantaCruzScraper(BaseScraper):
     (https://vip.santacruzbicycles.com/), an SAP Commerce Cloud / Spartacus
     storefront.
 
-    login()'s form-fill/submit is confirmed against the real login page, but
-    it still raises NotImplementedError before returning - there's no
-    confirmed way yet to tell a successful login from a failed one (see
-    LOGGED_IN_SELECTOR above). fetch_stock() is fully unimplemented - no
-    stock/availability page has been captured yet either.
+    login() is confirmed against real captured login and post-login pages.
+    fetch_stock() is fully unimplemented - no stock/availability page has
+    been captured yet (the account flyout's "Quick Order" and various
+    report links - open orders, shipments, price sheets, booking program -
+    are known to exist from the post-login page's own nav, but which one(s)
+    hold per-SKU availability/ETA isn't confirmed yet).
     """
 
     def login(self) -> None:
@@ -54,12 +58,16 @@ class SantaCruzScraper(BaseScraper):
         self.page.fill(PASSWORD_SELECTOR, self.brand_config.password or "")
         self.page.click(LOGIN_BUTTON_SELECTOR)
 
-        raise NotImplementedError(
-            "Santa Cruz login form fill/submit is wired up, but there's no "
-            "confirmed way yet to verify the login actually succeeded - need "
-            "a real post-login capture (redirect URL, or an element that "
-            "appears/disappears in the header) to finish this."
-        )
+        try:
+            self.page.wait_for_selector(
+                LOGGED_IN_SELECTOR, state="visible", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
+            )
+        except Exception:
+            raise RuntimeError(
+                f"Login to {self.brand_config.name} failed (no account greeting "
+                f"found) - check {self.brand_config.username_env}/"
+                f"{self.brand_config.password_env}."
+            )
 
     def fetch_stock(self) -> list[StockItem]:
         raise NotImplementedError(

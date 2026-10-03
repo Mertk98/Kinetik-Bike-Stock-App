@@ -1,0 +1,22 @@
+<!--
+Trimmed copy of the real post-login Homepage HTML on
+vip.santacruzbicycles.com, pasted by the user from a live session. Kept
+verbatim: the #navHeading "Welcome, <name>" greeting - login()'s
+LOGGED_IN_SELECTOR, confirmed real and absent entirely from the logged-out
+login page (which has only an empty <scb-login></scb-login> in the same
+header slot) - and the "/logout" Sign Out link in the same account flyout
+menu (not used as the selector itself since the real page keeps its
+containing .wrapper hidden via CSS until hover).
+-->
+<html><head><meta charset="utf-8"></head>
+<body>
+<div class="nav-heading" tabindex="0">
+  <div id="navHeading" class="user-greeting d-flex">
+    <div class="d-inline-flex align-items-center"> Welcome, <div class="username">Sales</div></div>
+  </div>
+  <p class="node-title">My Account</p>
+</div>
+<div class="wrapper">
+  <a href="/logout"> Sign Out </a>
+</div>
+</body></html>
