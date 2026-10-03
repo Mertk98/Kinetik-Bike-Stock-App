@@ -47,15 +47,15 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # PLACEHOLDER - scrapers/santa_cruz.py both raises NotImplementedError;
-  # no real dealer-portal HTML/network captures have been seen yet (this
-  # sandbox has no network access to inspect it directly). portal_url below
-  # is a guess, not confirmed. Disabled until the user pastes real captures
-  # (login page HTML, field names, stock page structure) to derive the real
-  # selectors from, same workflow used for devinci.py/transition_bikes.py.
+  # Disabled - login()'s field fill/submit is confirmed against a real
+  # captured login page (an SAP Commerce Cloud / Spartacus storefront), but
+  # it still raises NotImplementedError before returning: there's no
+  # confirmed way yet to tell a successful login from a failed one, and
+  # fetch_stock() is fully unimplemented (no stock page captured yet). See
+  # scrapers/santa_cruz.py.
   - key: santa_cruz
     name: "Santa Cruz Bicycles"
-    portal_url: "https://dealer.santacruzbicycles.com/"
+    portal_url: "https://vip.santacruzbicycles.com/login/"
     scraper: "kinetik_stock.scrapers.santa_cruz.SantaCruzScraper"
     username_env: "SANTA_CRUZ_USERNAME"
     password_env: "SANTA_CRUZ_PASSWORD"
