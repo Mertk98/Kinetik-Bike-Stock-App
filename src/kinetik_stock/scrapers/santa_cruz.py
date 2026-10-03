@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from kinetik_stock.models import StockItem
 from kinetik_stock.scrapers.base import BaseScraper
@@ -56,10 +57,26 @@ QUICK_ORDER_SEARCH_INPUT_SELECTOR = "input[formcontrolname='product']"
 ADD_TO_CART_BUTTON_SELECTOR = "button[aria-label='Add to cart']"
 MAX_ITEMS_PER_QUICK_ORDER_BATCH = 20
 
+# Confirmed against a real captured Quick Order page after successfully
+# adding part number 58-27313-448-3-933-132801 by typing it and pressing
+# Enter: each added item is a ".cx-quick-order-table-row" containing one
+# "scb-quick-order-item". Its product title is ".cx-name h4" (here,
+# "Bronson 5 C"); its SKU is read back out of a ".cx-code" div whose text is
+# "SKU: <code>" - there's another ".cx-code" div just above it holding the
+# build-kit abbreviation ("Brsn 5 C MX 27 MD CBN Deore"), so matching only
+# the one starting with "SKU:" is what tells them apart. "Empty list"
+# clears this quick-order list itself (not the real cart - that's a
+# separate "Clear Cart" the user described on the cart page, not captured
+# yet) so it can be used between batches of 20 if Add to cart isn't
+# clicked. Oddly, the added row's own quantity-counter input had max="0" in
+# this capture despite the item being added successfully with no warning -
+# not yet understood, so not relied upon for anything.
+QUICK_ORDER_ADDED_ROW_SELECTOR = ".cx-quick-order-table-row"
+QUICK_ORDER_ITEM_TITLE_SELECTOR = ".cx-name h4"
+QUICK_ORDER_ITEM_SKU_RE = re.compile(r"SKU:\s*(\S+)")
+QUICK_ORDER_EMPTY_LIST_BUTTON_SELECTOR = "button[aria-label='Empty list']"
+
 # UNCONFIRMED - still needed to finish fetch_stock():
-# - The quick-order-table row's HTML once a part number is successfully
-#   added (to read back SKU/name/price and confirm it matches what was
-#   typed).
 # - The warning message's exact HTML/text for a skipped (discontinued or
 #   OOS-with-no-ETA) part number, to tell that case apart from a real match.
 # - The cart page's HTML, specifically the "EST. Shipment QTY" field's
