@@ -47,6 +47,20 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
+  # PLACEHOLDER - scrapers/santa_cruz.py both raises NotImplementedError;
+  # no real dealer-portal HTML/network captures have been seen yet (this
+  # sandbox has no network access to inspect it directly). portal_url below
+  # is a guess, not confirmed. Disabled until the user pastes real captures
+  # (login page HTML, field names, stock page structure) to derive the real
+  # selectors from, same workflow used for devinci.py/transition_bikes.py.
+  - key: santa_cruz
+    name: "Santa Cruz Bicycles"
+    portal_url: "https://dealer.santacruzbicycles.com/"
+    scraper: "kinetik_stock.scrapers.santa_cruz.SantaCruzScraper"
+    username_env: "SANTA_CRUZ_USERNAME"
+    password_env: "SANTA_CRUZ_PASSWORD"
+    enabled: false
+
   # Confirmed working end-to-end by the user against a real live login and
   # scrape (this sandbox itself still can't reach transac.devinci.com to
   # verify anything directly - network policy). Four real bugs surfaced
