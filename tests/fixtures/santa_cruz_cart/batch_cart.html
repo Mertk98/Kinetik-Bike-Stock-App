@@ -1,0 +1,30 @@
+<!--
+Stand-in Cart page for testing fetch_stock_for_skus() end to end - not a
+real portal capture (unlike cart_item.html in this directory, which is a
+trimmed real one). Reproduces the real ".cx-item-list-row"/".schedule-
+line-wrapper .value" shape for one item (GOOD-SKU-1), with its "Est.
+shipment date" start computed as 2 days from whenever the test actually
+runs (well within the 7-day "available now" threshold) so the test stays
+deterministic without needing to mock Python's date.today(). "Clear cart"
+removes the row, same real selector (scb-clear-cart button) as the
+production page.
+-->
+<html><head><meta charset="utf-8"></head>
+<body>
+<div class="cx-item-list-row">
+  <div class="cx-name"><h4>Test Bike</h4></div>
+  <div class="cx-code"> Test Build Kit </div>
+  <div class="cx-code"> SKU: GOOD-SKU-1 </div>
+  <div class="schedule-line-wrapper"><div class="value" id="schedule-value"></div></div>
+</div>
+<scb-clear-cart>
+  <button onclick="document.querySelectorAll('.cx-item-list-row').forEach(function(el){el.remove();})"> Clear cart </button>
+</scb-clear-cart>
+<script>
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
+function fmt(d) { return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + d.getFullYear(); }
+var start = new Date(); start.setDate(start.getDate() + 2);
+var end = new Date(); end.setDate(end.getDate() + 9);
+document.getElementById('schedule-value').textContent = '1 by ' + fmt(start) + ' - ' + fmt(end);
+</script>
+</body></html>

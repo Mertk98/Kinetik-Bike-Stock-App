@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date
+from typing import Optional
 
-from kinetik_stock.models import StockItem
+from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.base import BaseScraper
 
 logger = logging.getLogger(__name__)
@@ -89,10 +91,63 @@ QUICK_ORDER_EMPTY_LIST_BUTTON_SELECTOR = "button[aria-label='Empty list']"
 # looking for this banner.
 QUICK_ORDER_ERROR_MESSAGE_SELECTOR = "cx-message.quick-order-errors-message"
 
-# UNCONFIRMED - still needed to finish fetch_stock():
-# - The cart page's HTML, specifically the "EST. Shipment QTY" field's
-#   markup per line (plain text? a date? a table?) and the "Clear Cart"
-#   button's selector.
+# Confirmed against a real captured Cart page (vip.santacruzbicycles.com/
+# cart) after a successful "Add to cart": each line is a
+# ".cx-item-list-row" (containing one "scb-cart-page-item"), using the same
+# ".cx-name h4"/".cx-code" shared sub-components as the Quick Order
+# table's rows above - QUICK_ORDER_ITEM_TITLE_SELECTOR and
+# QUICK_ORDER_ITEM_SKU_RE apply here too. Its "Est. shipment date" field
+# (rendered twice - a mobile and a desktop copy of the same data) is a
+# ".schedule-line-wrapper .value" whose text is "<qty> by <start
+# MM-DD-YYYY> - <end MM-DD-YYYY>" - a date *range*, not a single date. Per
+# the user, the range's START date is what decides "more than a week away"
+# (pre-order) vs "a week or less" (in stock now), and is what's reported
+# as the ETA. A split shipment (multiple schedule lines for one item)
+# isn't confirmed yet, but if it happens the closest (earliest) start date
+# across all of them is used - the same "closest date" rule as Devinci's
+# production schedule.
+#
+# SAFETY: fetch_stock_for_skus() must only ever read this page and click
+# "Clear cart" - never "Proceed To Checkout", which would place a real
+# order. There is no constant for that button on purpose.
+CART_PAGE_URL = "https://vip.santacruzbicycles.com/cart"
+CART_ITEM_ROW_SELECTOR = ".cx-item-list-row"
+CART_ITEM_SCHEDULE_VALUE_SELECTOR = ".schedule-line-wrapper .value"
+CLEAR_CART_BUTTON_SELECTOR = "scb-clear-cart button"
+SCHEDULE_DATE_RANGE_RE = re.compile(
+    r"by\s+(?P<start_month>\d{2})-(?P<start_day>\d{2})-(?P<start_year>\d{4})"
+    r"\s*-\s*\d{2}-\d{2}-\d{4}"
+)
+# Per the user: a week or less out counts as available now; anything
+# further out is a pre-order.
+STOCK_NOW_THRESHOLD_DAYS = 7
+# UNCONFIRMED - how long a row takes to appear in the Quick Order table
+# after typing a SKU and pressing Enter hasn't been timed against the real
+# portal; this is a starting guess, tunable after a live run.
+QUICK_ORDER_ADD_TIMEOUT_MS = 5000
+
+
+def _closest_cart_eta_date(row) -> Optional[str]:
+    """Earliest schedule-line start date (ISO YYYY-MM-DD) in a cart row, or
+    None if the row has none (shouldn't normally happen for a real item).
+    """
+    dates = []
+    for value_el in row.query_selector_all(CART_ITEM_SCHEDULE_VALUE_SELECTOR):
+        match = SCHEDULE_DATE_RANGE_RE.search(value_el.inner_text())
+        if match:
+            dates.append(
+                f"{match['start_year']}-{match['start_month']}-{match['start_day']}"
+            )
+    return min(dates) if dates else None
+
+
+def _cart_item_status(eta_date: Optional[str], today: Optional[date] = None) -> StockStatus:
+    if eta_date is None:
+        return StockStatus.UNKNOWN
+    if today is None:
+        today = date.today()
+    days_out = (date.fromisoformat(eta_date) - today).days
+    return StockStatus.IN_STOCK if days_out <= STOCK_NOW_THRESHOLD_DAYS else StockStatus.PRE_ORDER
 
 
 class SantaCruzScraper(BaseScraper):
@@ -101,14 +156,20 @@ class SantaCruzScraper(BaseScraper):
     storefront.
 
     login() is confirmed against real captured login and post-login pages.
-    fetch_stock() is fully unimplemented - the Quick Order page's search
-    input, 20-item batch limit, added-row markup, and Add to cart button
-    are all confirmed (see QUICK_ORDER_PAGE_URL above), including that a
-    skipped (discontinued/no-ETA) SKU simply never gets a row added for it
-    rather than showing a per-item warning. What's still missing is the
-    cart page's "EST. Shipment QTY" field, so there's nothing to parse a
-    real ETA from yet.
+    The whole Quick Order -> Add to cart -> read ETA -> Clear cart flow the
+    user described is now confirmed and implemented in
+    fetch_stock_for_skus() - this portal is search-driven (no browsable
+    full-catalog page), so the plain fetch_stock() BaseScraper contract
+    (no arguments) doesn't fit; it raises NotImplementedError pointing
+    there instead. Timing (how long to wait for a row to appear after
+    pressing Enter) is an unconfirmed guess, not yet verified live.
     """
+
+    def __init__(self, brand_config, browser, *, headless: bool = True):
+        super().__init__(brand_config, browser, headless=headless)
+        # Overridable so tests can point this at a local fixture instead of
+        # the real portal - same pattern as devinci.py's self._menu_url.
+        self._quick_order_url = QUICK_ORDER_PAGE_URL
 
     def login(self) -> None:
         self.page.goto(self.brand_config.portal_url)
@@ -129,8 +190,91 @@ class SantaCruzScraper(BaseScraper):
 
     def fetch_stock(self) -> list[StockItem]:
         raise NotImplementedError(
-            "Santa Cruz fetch_stock() not implemented yet - the Quick Order "
-            "page's search/add-to-cart flow is confirmed, but the added-row "
-            "markup, the skipped-item warning, and the cart page's EST. "
-            "Shipment QTY field all still need a real capture."
+            "Santa Cruz's dealer portal is search-driven (Quick Order by "
+            "part number) rather than browsable, so there's no fixed "
+            "catalog page to scrape - call fetch_stock_for_skus(skus) with "
+            "the list of part numbers to check instead."
         )
+
+    def fetch_stock_for_skus(self, skus: list[str]) -> list[StockItem]:
+        items: list[StockItem] = []
+        for start in range(0, len(skus), MAX_ITEMS_PER_QUICK_ORDER_BATCH):
+            batch = skus[start : start + MAX_ITEMS_PER_QUICK_ORDER_BATCH]
+            items.extend(self._fetch_stock_for_batch(batch))
+        return items
+
+    def _fetch_stock_for_batch(self, skus: list[str]) -> list[StockItem]:
+        self.page.goto(self._quick_order_url)
+
+        added_skus = []
+        for sku in skus:
+            self.page.fill(QUICK_ORDER_SEARCH_INPUT_SELECTOR, sku)
+            self.page.press(QUICK_ORDER_SEARCH_INPUT_SELECTOR, "Enter")
+            if self._wait_for_quick_order_row(sku):
+                added_skus.append(sku)
+            else:
+                logger.info(
+                    "%s wasn't added to the Quick Order list (discontinued or "
+                    "out of stock with no ETA).",
+                    sku,
+                )
+
+        items: list[StockItem] = [
+            StockItem(
+                brand=self.brand_config.name,
+                sku=sku,
+                product_title="",
+                status=StockStatus.OUT_OF_STOCK,
+                raw_status_text=(
+                    "not added to Quick Order (discontinued or out of stock "
+                    "with no ETA)"
+                ),
+                source_url=QUICK_ORDER_PAGE_URL,
+            )
+            for sku in skus
+            if sku not in added_skus
+        ]
+
+        if not added_skus:
+            return items
+
+        self.page.click(ADD_TO_CART_BUTTON_SELECTOR)
+        self.page.wait_for_load_state("networkidle")
+
+        for row in self.page.query_selector_all(CART_ITEM_ROW_SELECTOR):
+            title_el = row.query_selector(QUICK_ORDER_ITEM_TITLE_SELECTOR)
+            title = title_el.inner_text().strip() if title_el else ""
+
+            sku = None
+            for code_div in row.query_selector_all(".cx-code"):
+                match = QUICK_ORDER_ITEM_SKU_RE.search(code_div.inner_text())
+                if match:
+                    sku = match.group(1)
+            if sku is None:
+                logger.warning("Cart row with no matching SKU found: %r", title)
+                continue
+
+            eta_date = _closest_cart_eta_date(row)
+            status = _cart_item_status(eta_date)
+            items.append(
+                StockItem(
+                    brand=self.brand_config.name,
+                    sku=sku,
+                    product_title=title,
+                    status=status,
+                    eta_date=eta_date if status == StockStatus.PRE_ORDER else None,
+                    raw_status_text=f"est_shipment_start={eta_date}",
+                    source_url=self.page.url,
+                )
+            )
+
+        self.page.click(CLEAR_CART_BUTTON_SELECTOR)
+        return items
+
+    def _wait_for_quick_order_row(self, sku: str) -> bool:
+        selector = f"{QUICK_ORDER_ADDED_ROW_SELECTOR}:has-text('{sku}')"
+        try:
+            self.page.wait_for_selector(selector, timeout=QUICK_ORDER_ADD_TIMEOUT_MS)
+            return True
+        except Exception:
+            return False

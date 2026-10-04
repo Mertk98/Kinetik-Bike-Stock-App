@@ -1,0 +1,34 @@
+<!--
+Stand-in Quick Order page for testing fetch_stock_for_skus() end to end -
+not a real portal capture (unlike the other fixtures in this directory,
+which are trimmed copies of real captures). It reproduces the two
+observed real behaviors: typing "GOOD-SKU-1" and pressing Enter adds a
+".cx-quick-order-table-row" (same shape as the real added-row capture);
+typing anything else and pressing Enter adds nothing at all (same as the
+real skipped-item capture) - and "Add to cart" navigates on to a cart
+fixture, same idea as the login/landing fixture pair elsewhere in this
+project.
+-->
+<html><head><meta charset="utf-8"></head>
+<body>
+<input formcontrolname="product" type="text" placeholder="Enter Product name or SKU" aria-label="Search" onkeydown="handleQuickOrderKey(event)">
+<div class="quick-order-table-body">
+  <div id="quick-order-rows"></div>
+</div>
+<button aria-label="Add to cart" onclick="window.location.href='../santa_cruz_cart/batch_cart.html'"> Add to cart </button>
+<script>
+function handleQuickOrderKey(event) {
+  if (event.key !== 'Enter') return;
+  var input = event.target;
+  if (input.value === 'GOOD-SKU-1') {
+    var row = document.createElement('div');
+    row.className = 'cx-quick-order-table-row';
+    row.innerHTML = '<div class="cx-name"><h4>Test Bike</h4></div>' +
+      '<div class="cx-code"> Test Build Kit </div>' +
+      '<div class="cx-code"> SKU: GOOD-SKU-1 </div>';
+    document.getElementById('quick-order-rows').appendChild(row);
+  }
+  input.value = '';
+}
+</script>
+</body></html>
