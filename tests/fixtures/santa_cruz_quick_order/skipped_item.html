@@ -1,0 +1,21 @@
+<!--
+Trimmed copy of a real Quick Order page's response to a known-bad part
+number (58-26244-458-3-891-131501, discontinued or out of stock with no
+ETA), pasted by the user. Kept verbatim: the quick-order-table stays
+completely empty (no row at all for the typed SKU) - per the user, this
+capture was taken before clicking "Add to cart"; the generic
+"Error proceeding to Cart." cx-message only shows up after that click, and
+isn't itself a per-item signal, so it's included here but fetch_stock()
+should rely on the missing row, not this message, to detect a skip.
+-->
+<html><head><meta charset="utf-8"></head>
+<body>
+<cx-message class="quick-order-errors-message">
+  <div class="cx-message cx-message-danger">
+    <span class="cx-message-text"> Error proceeding to Cart. </span>
+  </div>
+</cx-message>
+<div class="quick-order-table-body">
+  <scb-quick-order-table></scb-quick-order-table>
+</div>
+</body></html>

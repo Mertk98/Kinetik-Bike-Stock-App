@@ -25,6 +25,11 @@ ADDED_ROW_FIXTURE_PAGE = (
     .resolve()
     .as_uri()
 )
+SKIPPED_ITEM_FIXTURE_PAGE = (
+    (Path(__file__).parent / "fixtures" / "santa_cruz_quick_order" / "skipped_item.html")
+    .resolve()
+    .as_uri()
+)
 
 
 def make_brand_config() -> BrandConfig:
@@ -116,6 +121,29 @@ def test_added_row_selectors_match_real_quick_order_markup():
                     if match:
                         sku = match.group(1)
                 assert sku == "58-27313-448-3-933-132801"
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+
+def test_skipped_item_leaves_quick_order_table_with_no_matching_row():
+    # Confirmed against a real captured Quick Order page for a known-bad
+    # part number (discontinued or OOS-with-no-ETA): no row gets added for
+    # it at all, so detecting a skip means finding no matching row, not
+    # looking for a per-item warning - the page's only message at this
+    # point is the generic (not per-item) "Error proceeding to Cart."
+    # banner, which per the user doesn't even show until "Add to cart" is
+    # clicked.
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = SantaCruzScraper(brand_config, browser)
+            try:
+                scraper.page.goto(SKIPPED_ITEM_FIXTURE_PAGE)
+                rows = scraper.page.query_selector_all(QUICK_ORDER_ADDED_ROW_SELECTOR)
+                assert rows == []
             finally:
                 scraper.close()
         finally:

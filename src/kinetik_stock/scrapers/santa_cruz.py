@@ -76,9 +76,20 @@ QUICK_ORDER_ITEM_TITLE_SELECTOR = ".cx-name h4"
 QUICK_ORDER_ITEM_SKU_RE = re.compile(r"SKU:\s*(\S+)")
 QUICK_ORDER_EMPTY_LIST_BUTTON_SELECTOR = "button[aria-label='Empty list']"
 
+# Confirmed against a real captured Quick Order page for a known-bad part
+# number (58-26244-458-3-891-131501, discontinued or OOS-with-no-ETA): no
+# row was added for it at all - the quick-order-table stayed completely
+# empty, with no per-item warning shown at that point. Per the user, the
+# generic "Error proceeding to Cart." banner (cx-message.quick-order-
+# errors-message, a collapsible "Please review these errors" section whose
+# detail isn't in this capture) only appears later, once "Add to cart" is
+# clicked - it isn't a per-item signal and doesn't name which SKU failed.
+# So a skipped item is detected the same way a real match is confirmed: by
+# whether a row with the typed SKU actually showed up in the table, not by
+# looking for this banner.
+QUICK_ORDER_ERROR_MESSAGE_SELECTOR = "cx-message.quick-order-errors-message"
+
 # UNCONFIRMED - still needed to finish fetch_stock():
-# - The warning message's exact HTML/text for a skipped (discontinued or
-#   OOS-with-no-ETA) part number, to tell that case apart from a real match.
 # - The cart page's HTML, specifically the "EST. Shipment QTY" field's
 #   markup per line (plain text? a date? a table?) and the "Clear Cart"
 #   button's selector.
@@ -91,10 +102,12 @@ class SantaCruzScraper(BaseScraper):
 
     login() is confirmed against real captured login and post-login pages.
     fetch_stock() is fully unimplemented - the Quick Order page's search
-    input, 20-item batch limit, and Add to cart button are confirmed (see
-    QUICK_ORDER_PAGE_URL above), but the row/warning markup and the cart
-    page's "EST. Shipment QTY" field aren't captured yet, so there's nothing
-    to parse a real ETA from.
+    input, 20-item batch limit, added-row markup, and Add to cart button
+    are all confirmed (see QUICK_ORDER_PAGE_URL above), including that a
+    skipped (discontinued/no-ETA) SKU simply never gets a row added for it
+    rather than showing a per-item warning. What's still missing is the
+    cart page's "EST. Shipment QTY" field, so there's nothing to parse a
+    real ETA from yet.
     """
 
     def login(self) -> None:
