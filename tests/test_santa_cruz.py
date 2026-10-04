@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 from kinetik_stock.browser import launch_chromium
 from kinetik_stock.config import BrandConfig
-from kinetik_stock.models import StockStatus
+from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers import santa_cruz as santa_cruz_module
 from kinetik_stock.scrapers.santa_cruz import (
     CART_ITEM_ROW_SELECTOR,
@@ -20,6 +20,9 @@ from kinetik_stock.scrapers.santa_cruz import (
     SantaCruzScraper,
     _cart_item_status,
     _closest_cart_eta_date,
+    _load_santa_cruz_items,
+    _report_status_and_eta,
+    build_availability_report,
 )
 
 LOGIN_FIXTURE_PAGE = (
@@ -243,3 +246,118 @@ def test_fetch_stock_not_implemented():
                 scraper.close()
         finally:
             browser.close()
+
+
+def test_load_santa_cruz_items(tmp_path):
+    # Per the user: same CSV format as config/devinci_items.csv.
+    csv_path = tmp_path / "santa_cruz_items.csv"
+    csv_path.write_text(
+        "System ID,Manufact. SKU,Description\n"
+        "1,58-26313-454-3-905-262901,Bronson 5 C MX 26 MD GRN 90\n"
+        "2,,No Sku On File\n"
+    )
+    rows = _load_santa_cruz_items(csv_path)
+    assert rows == [
+        {
+            "system_id": "1",
+            "manufacturer_sku": "58-26313-454-3-905-262901",
+            "item_description": "Bronson 5 C MX 26 MD GRN 90",
+        },
+        {
+            "system_id": "2",
+            "manufacturer_sku": "",
+            "item_description": "No Sku On File",
+        },
+    ]
+
+
+def _make_item(sku, status, eta_date=None) -> StockItem:
+    return StockItem(
+        brand="Santa Cruz Bicycles",
+        sku=sku,
+        product_title="Test Bike",
+        status=status,
+        eta_date=eta_date,
+    )
+
+
+def test_report_status_and_eta_in_stock():
+    assert _report_status_and_eta(_make_item("SKU-1", StockStatus.IN_STOCK)) == (
+        "Available",
+        "Now",
+    )
+
+
+def test_report_status_and_eta_pre_order():
+    item = _make_item("SKU-1", StockStatus.PRE_ORDER, eta_date="2026-10-20")
+    assert _report_status_and_eta(item) == ("pre-order", "2026-10-20")
+
+
+def test_report_status_and_eta_out_of_stock():
+    assert _report_status_and_eta(_make_item("SKU-1", StockStatus.OUT_OF_STOCK)) == (
+        "Out of Stock",
+        "N/A",
+    )
+
+
+def test_build_availability_report_matches_by_sku():
+    # Unlike Devinci, Santa Cruz's "Manufact. SKU" is assumed to already be
+    # the full, specific part number for one exact bike/size/color combo -
+    # matching is by SKU alone, no size parsed out of the description.
+    items = [
+        _make_item("GOOD-SKU-1", StockStatus.IN_STOCK),
+        _make_item("GOOD-SKU-2", StockStatus.PRE_ORDER, eta_date="2026-10-20"),
+    ]
+    rows = [
+        {"system_id": "1", "manufacturer_sku": "GOOD-SKU-1", "item_description": "Bike A"},
+        {"system_id": "2", "manufacturer_sku": "GOOD-SKU-2", "item_description": "Bike B"},
+        {"system_id": "3", "manufacturer_sku": "", "item_description": "No Sku On File"},
+        {"system_id": "4", "manufacturer_sku": "NOT-FOUND-SKU", "item_description": "Bike C"},
+    ]
+
+    report_rows = build_availability_report(items, rows)
+    by_id = {r["System ID"]: r for r in report_rows}
+
+    assert (by_id["1"]["Status"], by_id["1"]["ETA"]) == ("Available", "Now")
+    assert (by_id["2"]["Status"], by_id["2"]["ETA"]) == ("pre-order", "2026-10-20")
+    assert (by_id["3"]["Status"], by_id["3"]["ETA"]) == ("Discontinued", "N/A")
+    assert (by_id["4"]["Status"], by_id["4"]["ETA"]) == ("N/A", "N/A")
+
+
+def test_generate_availability_report_uses_fetch_stock_for_skus(tmp_path, monkeypatch):
+    csv_path = tmp_path / "santa_cruz_items.csv"
+    csv_path.write_text(
+        "System ID,Manufact. SKU,Description\n"
+        "1,GOOD-SKU-1,Bike A\n"
+        "2,GOOD-SKU-1,Bike A duplicate row\n"
+        "3,GOOD-SKU-2,Bike B\n"
+    )
+
+    fake_items = [
+        _make_item("GOOD-SKU-1", StockStatus.IN_STOCK),
+        _make_item("GOOD-SKU-2", StockStatus.PRE_ORDER, eta_date="2026-10-20"),
+    ]
+    seen_skus = []
+
+    def fake_fetch_stock_for_skus(self, skus):
+        seen_skus.extend(skus)
+        return fake_items
+
+    brand_config = make_brand_config()
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = SantaCruzScraper(brand_config, browser)
+            monkeypatch.setattr(
+                SantaCruzScraper, "fetch_stock_for_skus", fake_fetch_stock_for_skus
+            )
+            try:
+                rows = scraper.generate_availability_report(csv_path)
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
+
+    # The duplicate SKU (rows 1 and 2) is only looked up once.
+    assert seen_skus == ["GOOD-SKU-1", "GOOD-SKU-2"]
+    assert [r["Status"] for r in rows] == ["Available", "Available", "pre-order"]

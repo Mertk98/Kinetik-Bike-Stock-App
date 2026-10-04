@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import csv
 import logging
 import re
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
+from kinetik_stock.config import REPO_ROOT
 from kinetik_stock.models import StockItem, StockStatus
 from kinetik_stock.scrapers.base import BaseScraper
 
@@ -150,6 +153,118 @@ def _cart_item_status(eta_date: Optional[str], today: Optional[date] = None) -> 
     return StockStatus.IN_STOCK if days_out <= STOCK_NOW_THRESHOLD_DAYS else StockStatus.PRE_ORDER
 
 
+# Per the user: the input CSV uses the same format as config/devinci_items.csv
+# ("System ID", "Manufact. SKU", "Description" columns - the user's own
+# inventory export). Unlike Devinci, Santa Cruz's "Manufact. SKU" is assumed
+# to already be the full, specific part number for one exact bike/size/color
+# combo (confirmed real examples like "58-26313-454-3-905-262901" always
+# identify one specific variant on their own) - so matching below is by SKU
+# alone, with no separate size parsed out of the description. If the user's
+# real CSV turns out not to follow that (e.g. one SKU shared across sizes),
+# this will need the same size-parsing fix devinci.py needed.
+SANTA_CRUZ_ITEMS_CSV = REPO_ROOT / "config" / "santa_cruz_items.csv"
+SANTA_CRUZ_REPORT_FIELDNAMES = ["System ID", "Manufact. SKU", "Description", "Status", "ETA"]
+
+
+def _load_santa_cruz_items(path: Path = SANTA_CRUZ_ITEMS_CSV) -> list[dict]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found - add a CSV with 'System ID', 'Manufact. SKU', "
+            "'Description' columns (the user's own inventory export)."
+        )
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = [
+            {
+                "system_id": row["System ID"].strip(),
+                "manufacturer_sku": (row.get("Manufact. SKU") or "").strip(),
+                "item_description": row["Description"].strip(),
+            }
+            for row in csv.DictReader(f)
+        ]
+    if not rows:
+        raise ValueError(f"{path} has no rows.")
+    return rows
+
+
+def write_santa_cruz_report_csv(rows: list[dict], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=SANTA_CRUZ_REPORT_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _report_status_and_eta(item: StockItem) -> tuple[str, str]:
+    """Formats a scraped StockItem into the same wording style as Devinci's
+    own report (_report_status_and_eta in devinci.py), for consistency
+    across the user's per-brand reports.
+    """
+    if item.status == StockStatus.IN_STOCK:
+        return "Available", "Now"
+    if item.status == StockStatus.PRE_ORDER:
+        return "pre-order", item.eta_date or "N/A"
+    if item.status == StockStatus.OUT_OF_STOCK:
+        return "Out of Stock", "N/A"
+    return "Unknown", "N/A"
+
+
+def build_availability_report(items: list[StockItem], rows: list[dict]) -> list[dict]:
+    """Pure function: matches each input row's Manufacturer SKU against the
+    one already-fetched StockItem for that exact SKU, producing exactly one
+    report row per input row. Kept separate from generate_availability_
+    report() so it's testable without needing a live fetch_stock_for_skus().
+    """
+    items_by_sku: dict[str, StockItem] = {item.sku: item for item in items}
+
+    report_rows: list[dict] = []
+    for row in rows:
+        system_id = row["system_id"]
+        sku = row["manufacturer_sku"]
+        description = row["item_description"]
+
+        if not sku:
+            # Per the user: no item number on file at all means the bike is
+            # considered discontinued, unlike a SKU that's present but
+            # wasn't found among the checked items (reported as N/A).
+            report_rows.append(
+                {
+                    "System ID": system_id,
+                    "Manufact. SKU": sku,
+                    "Description": description,
+                    "Status": "Discontinued",
+                    "ETA": "N/A",
+                }
+            )
+            continue
+
+        matched = items_by_sku.get(sku)
+        if matched is None:
+            logger.warning("SKU %s (%r) wasn't found among the checked items.", sku, description)
+            report_rows.append(
+                {
+                    "System ID": system_id,
+                    "Manufact. SKU": sku,
+                    "Description": description,
+                    "Status": "N/A",
+                    "ETA": "N/A",
+                }
+            )
+            continue
+
+        status_text, eta_text = _report_status_and_eta(matched)
+        report_rows.append(
+            {
+                "System ID": system_id,
+                "Manufact. SKU": sku,
+                "Description": description,
+                "Status": status_text,
+                "ETA": eta_text,
+            }
+        )
+
+    return report_rows
+
+
 class SantaCruzScraper(BaseScraper):
     """Scraper for Santa Cruz Bicycles' B2B dealer portal
     (https://vip.santacruzbicycles.com/), an SAP Commerce Cloud / Spartacus
@@ -202,6 +317,19 @@ class SantaCruzScraper(BaseScraper):
             batch = skus[start : start + MAX_ITEMS_PER_QUICK_ORDER_BATCH]
             items.extend(self._fetch_stock_for_batch(batch))
         return items
+
+    def generate_availability_report(
+        self, input_csv: Path = SANTA_CRUZ_ITEMS_CSV
+    ) -> list[dict]:
+        rows = _load_santa_cruz_items(input_csv)
+        # Dedupe while preserving order - each Quick Order search costs a
+        # real page round-trip, so a SKU repeated across input rows (e.g.
+        # listed for more than one System ID) is only looked up once.
+        skus = list(
+            dict.fromkeys(row["manufacturer_sku"] for row in rows if row["manufacturer_sku"])
+        )
+        items = self.fetch_stock_for_skus(skus)
+        return build_availability_report(items, rows)
 
     def _fetch_stock_for_batch(self, skus: list[str]) -> list[StockItem]:
         self.page.goto(self._quick_order_url)

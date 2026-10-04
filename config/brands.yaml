@@ -47,11 +47,14 @@ brands:
     password_env: "TRANSITION_BIKES_PASSWORD"
     enabled: false
 
-  # Disabled - login() is confirmed against real captured login and
-  # post-login pages (an SAP Commerce Cloud / Spartacus storefront), but
-  # hasn't been run live yet (this sandbox can't reach
-  # vip.santacruzbicycles.com). fetch_stock() is fully unimplemented - no
-  # stock/availability page has been captured yet. See scrapers/santa_cruz.py.
+  # Disabled - login() and the whole Quick Order -> Add to cart -> read
+  # ETA -> Clear cart flow (fetch_stock_for_skus(), used via
+  # generate_availability_report() - see santa_cruz_report.py, this portal
+  # has no browsable catalog page so the normal fetch_stock() doesn't
+  # apply) are all implemented against real captured portal pages (an SAP
+  # Commerce Cloud / Spartacus storefront), but none of it has been run
+  # live yet (this sandbox can't reach vip.santacruzbicycles.com). See
+  # scrapers/santa_cruz.py.
   - key: santa_cruz
     name: "Santa Cruz Bicycles"
     portal_url: "https://vip.santacruzbicycles.com/login"
