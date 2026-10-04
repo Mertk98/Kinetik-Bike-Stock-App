@@ -124,10 +124,12 @@ SCHEDULE_DATE_RANGE_RE = re.compile(
 # Per the user: a week or less out counts as available now; anything
 # further out is a pre-order.
 STOCK_NOW_THRESHOLD_DAYS = 7
-# UNCONFIRMED - how long a row takes to appear in the Quick Order table
-# after typing a SKU and pressing Enter hasn't been timed against the real
-# portal; this is a starting guess, tunable after a live run.
-QUICK_ORDER_ADD_TIMEOUT_MS = 5000
+# Confirmed live by the user: a successfully added row shows up 1-3
+# seconds after pressing Enter. 4s gives a ~1s safety margin above that -
+# generous enough to stay reliable, but not so long that a skipped item
+# (which never gets a row at all, so this always times out in full) wastes
+# excess time across a batch that may have several skips.
+QUICK_ORDER_ADD_TIMEOUT_MS = 4000
 
 
 def _closest_cart_eta_date(row) -> Optional[str]:
@@ -277,7 +279,7 @@ class SantaCruzScraper(BaseScraper):
     full-catalog page), so the plain fetch_stock() BaseScraper contract
     (no arguments) doesn't fit; it raises NotImplementedError pointing
     there instead. Timing (how long to wait for a row to appear after
-    pressing Enter) is an unconfirmed guess, not yet verified live.
+    pressing Enter) is confirmed live too - see QUICK_ORDER_ADD_TIMEOUT_MS.
     """
 
     def __init__(self, brand_config, browser, *, headless: bool = True):
