@@ -174,11 +174,15 @@ def _load_santa_cruz_items(path: Path = SANTA_CRUZ_ITEMS_CSV) -> list[dict]:
             f"{path} not found - add a CSV with 'System ID', 'Manufact. SKU', "
             "'Description' columns (the user's own inventory export)."
         )
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         rows = [
             {
                 "system_id": row["System ID"].strip(),
-                "manufacturer_sku": (row.get("Manufact. SKU") or "").strip(),
+                # The inventory export's header is "Manufacturer SKU"; older
+                # hand-edited copies use "Manufact. SKU" - accept either.
+                "manufacturer_sku": (
+                    row.get("Manufact. SKU") or row.get("Manufacturer SKU") or ""
+                ).strip(),
                 "item_description": row["Description"].strip(),
             }
             for row in csv.DictReader(f)
