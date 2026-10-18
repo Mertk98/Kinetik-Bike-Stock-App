@@ -130,6 +130,10 @@ STOCK_NOW_THRESHOLD_DAYS = 7
 # (which never gets a row at all, so this always times out in full) wastes
 # excess time across a batch that may have several skips.
 QUICK_ORDER_ADD_TIMEOUT_MS = 4000
+# Per the user: pressing Enter once doesn't always add the bike - it can
+# take a few tries. A SKU is only treated as "not added" after this many
+# fill + Enter attempts have each failed to produce a row.
+QUICK_ORDER_ADD_ATTEMPTS = 3
 
 
 def _closest_cart_eta_date(row) -> Optional[str]:
@@ -343,9 +347,7 @@ class SantaCruzScraper(BaseScraper):
         added_skus = []
         dumped_miss = False
         for sku in skus:
-            self.page.fill(QUICK_ORDER_SEARCH_INPUT_SELECTOR, sku)
-            self.page.press(QUICK_ORDER_SEARCH_INPUT_SELECTOR, "Enter")
-            if self._wait_for_quick_order_row(sku):
+            if self._add_sku_to_quick_order(sku):
                 added_skus.append(sku)
             else:
                 logger.info(
@@ -411,6 +413,16 @@ class SantaCruzScraper(BaseScraper):
 
         self.page.click(CLEAR_CART_BUTTON_SELECTOR)
         return items
+
+    def _add_sku_to_quick_order(self, sku: str) -> bool:
+        for attempt in range(1, QUICK_ORDER_ADD_ATTEMPTS + 1):
+            self.page.fill(QUICK_ORDER_SEARCH_INPUT_SELECTOR, sku)
+            self.page.press(QUICK_ORDER_SEARCH_INPUT_SELECTOR, "Enter")
+            if self._wait_for_quick_order_row(sku):
+                if attempt > 1:
+                    logger.debug("%s was added on attempt %d.", sku, attempt)
+                return True
+        return False
 
     def _dump_page_for_debugging(self, sku: str) -> None:
         out_dir = REPO_ROOT / "output" / "santa_cruz_debug"
