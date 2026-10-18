@@ -130,10 +130,12 @@ STOCK_NOW_THRESHOLD_DAYS = 7
 # (which never gets a row at all, so this always times out in full) wastes
 # excess time across a batch that may have several skips.
 QUICK_ORDER_ADD_TIMEOUT_MS = 4000
-# Per the user: pressing Enter once doesn't always add the bike - it can
-# take a few tries. A SKU is only treated as "not added" after this many
-# fill + Enter attempts have each failed to produce a row.
-QUICK_ORDER_ADD_ATTEMPTS = 3
+# Per the user: a glitch in the portal's Quick Order box means one Enter
+# press doesn't always add the bike. The fix is to leave the typed part
+# number in the box and press Enter again (1-2 presses total), not to
+# clear and retype it. A SKU is only treated as "not added" after this
+# many presses have each failed to produce a row.
+QUICK_ORDER_ENTER_PRESSES = 2
 
 
 def _closest_cart_eta_date(row) -> Optional[str]:
@@ -415,12 +417,12 @@ class SantaCruzScraper(BaseScraper):
         return items
 
     def _add_sku_to_quick_order(self, sku: str) -> bool:
-        for attempt in range(1, QUICK_ORDER_ADD_ATTEMPTS + 1):
-            self.page.fill(QUICK_ORDER_SEARCH_INPUT_SELECTOR, sku)
+        self.page.fill(QUICK_ORDER_SEARCH_INPUT_SELECTOR, sku)
+        for press in range(1, QUICK_ORDER_ENTER_PRESSES + 1):
             self.page.press(QUICK_ORDER_SEARCH_INPUT_SELECTOR, "Enter")
             if self._wait_for_quick_order_row(sku):
-                if attempt > 1:
-                    logger.debug("%s was added on attempt %d.", sku, attempt)
+                if press > 1:
+                    logger.debug("%s was added on Enter press %d.", sku, press)
                 return True
         return False
 
