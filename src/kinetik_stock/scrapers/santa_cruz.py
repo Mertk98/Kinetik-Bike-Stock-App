@@ -341,6 +341,7 @@ class SantaCruzScraper(BaseScraper):
         self.page.goto(self._quick_order_url)
 
         added_skus = []
+        dumped_miss = False
         for sku in skus:
             self.page.fill(QUICK_ORDER_SEARCH_INPUT_SELECTOR, sku)
             self.page.press(QUICK_ORDER_SEARCH_INPUT_SELECTOR, "Enter")
@@ -352,6 +353,12 @@ class SantaCruzScraper(BaseScraper):
                     "out of stock with no ETA).",
                     sku,
                 )
+                if not dumped_miss:
+                    # Every miss looks identical in the log, so the first one
+                    # per run saves what the page actually showed - tells a
+                    # real "not orderable" apart from a selector/timing bug.
+                    self._dump_page_for_debugging(sku)
+                    dumped_miss = True
 
         items: list[StockItem] = [
             StockItem(
@@ -404,6 +411,21 @@ class SantaCruzScraper(BaseScraper):
 
         self.page.click(CLEAR_CART_BUTTON_SELECTOR)
         return items
+
+    def _dump_page_for_debugging(self, sku: str) -> None:
+        out_dir = REPO_ROOT / "output" / "santa_cruz_debug"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "first_miss.html").write_text(self.page.content(), encoding="utf-8")
+            self.page.screenshot(path=str(out_dir / "first_miss.png"), full_page=True)
+            logger.info(
+                "Saved the Quick Order page as it looked after %s to %s "
+                "(first_miss.html / first_miss.png).",
+                sku,
+                out_dir,
+            )
+        except Exception:
+            logger.exception("Couldn't save debug snapshot for %s", sku)
 
     def _wait_for_quick_order_row(self, sku: str) -> bool:
         selector = f"{QUICK_ORDER_ADDED_ROW_SELECTOR}:has-text('{sku}')"

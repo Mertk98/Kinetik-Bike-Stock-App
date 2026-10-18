@@ -5,3 +5,4 @@ __pycache__/
 output/*.csv
 .venv/
 venv/
+output/santa_cruz_debug/
