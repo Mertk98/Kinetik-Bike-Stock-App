@@ -400,7 +400,13 @@ class TransitionBikesScraper(BaseScraper):
                         target = option
                         break
                 if target is not None:
-                    target.click()
+                    # DOM-level click rather than a mouse click at the
+                    # element's coordinates: the public storefront overlays
+                    # the page with a Klaviyo popup, a data-compliance
+                    # banner and a sticky nav menu, any of which can sit on
+                    # top of the option and make Playwright's own click
+                    # time out ("subtree intercepts pointer events").
+                    target.evaluate("el => el.click()")
                     self.page.wait_for_load_state("networkidle")
                 else:
                     logger.debug(
