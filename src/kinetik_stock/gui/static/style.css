@@ -1,4 +1,4 @@
-:root{--bg:#fff;--card:#fff;--fg:#111;--muted:#666;--accent:#e10600;--line:#e3e3e3;--err:#b42318;--ok:#15803d}
+:root{--bg:#fff;--card:#fff;--fg:#111;--muted:#666;--accent:#c20000;--line:#e3e3e3;--err:#b42318;--ok:#15803d}
 *{box-sizing:border-box}
 body{margin:0;font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg)}
 header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px}
@@ -34,6 +34,6 @@ body.login{display:flex;min-height:100vh;align-items:center;justify-content:cent
 body.login .card{width:100%;max-width:360px}
 body.login input{width:100%;margin:6px 0 12px}
 header{border-bottom:3px solid var(--accent)}header h1{letter-spacing:.04em;text-transform:uppercase}
-button.primary:hover:not(:disabled){background:#b80500}
+button.primary:hover:not(:disabled){background:#9e0000}
 .row.soon{opacity:.55}.badge{background:#111;color:#fff}
 .card{box-shadow:0 1px 2px rgba(0,0,0,.04)}
