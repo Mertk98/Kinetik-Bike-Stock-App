@@ -29,7 +29,7 @@ cp .env.example .env          # then fill in real credentials
 
 ```bash
 python run.py                          # scrape all enabled brands
-python run.py --brands example_brand   # scrape just one brand
+python run.py --brands norco   # scrape just one brand
 python run.py --no-headless            # show the browser window (debugging)
 python run.py --output output/stock.csv
 python run.py -v                       # verbose/debug logging
@@ -39,6 +39,34 @@ Output CSVs are written to `output/` by default, one per brand selection
 (e.g. `stock_transition_bikes.csv`, `stock_all.csv` for a full run) -
 overwritten on each run rather than piling up. Pass `--output` for a
 different/one-off path.
+
+## GUI (Windows + Android)
+
+```bash
+python gui.py          # or double-click start_gui.bat on Windows
+```
+
+- **On the Windows PC:** open <http://localhost:8080>.
+- **On an Android phone:** connect to the same Wi-Fi and open the
+  `http://<pc-ip>:8080` address printed at startup. In Chrome, menu →
+  *Add to Home screen* installs it like an app.
+
+The scrapers drive a real Chromium browser (Playwright), which can't run on
+Android - so the scraping always happens on the PC, and the phone is a remote
+control for it. The PC has to be on and running `gui.py`; allow Python through
+Windows Firewall on private networks when prompted.
+
+The GUI can start logins to your dealer accounts, so it needs a login: set
+`KINETIK_GUI_PASSWORD` in `.env` (and optionally `KINETIK_GUI_USERNAME`, which
+defaults to `sales@kinetikcycles.com`); without a password, a random one is
+printed on each start. Use `python gui.py --local-only` to disable phone access. Don't expose
+the port to the internet.
+
+Tabs: **Run** (one report per brand - Norco, Devinci etc. each write their own
+file, never combined; "Run all" just runs them one after another; brands still
+in progress show as such and can't be run; live log), **Results** (browse/filter/download anything in `output/`), **SKU
+lists** (download/replace each report's input CSV; the old one is kept as
+`.csv.bak`). Dealer credentials are still edited in `.env`, not in the GUI.
 
 ## CSV schema
 
@@ -61,18 +89,6 @@ still captured on each `StockItem` in code, just not written to the CSV.
 Tell me if you want any of that back as a column, or want fewer/different
 ones once you've seen how Timesact Pre-Order's import expects the data.
 
-## Included demo brand
-
-`config/brands.yaml` ships with an `example_brand` entry that points at a
-local test fixture (`tests/fixtures/example_b2b/`), not a real B2B site. It
-exists so `python run.py` produces real, correct output immediately, and so
-you can see the whole login → scrape → CSV pipeline work. Its "credentials"
-(`demo_user` / `demo_pass` in `.env.example`) aren't secret — they're
-hardcoded in the fixture HTML.
-
-Once you add your first real brand, set `example_brand`'s `enabled: false` in
-`config/brands.yaml` (or delete the entry).
-
 ## Adding a real brand
 
 1. Add credentials to `.env`:
@@ -90,7 +106,7 @@ Once you add your first real brand, set `example_brand`'s `enabled: false` in
      password_env: "ACME_BIKES_PASSWORD"
      enabled: true
    ```
-3. Copy `src/kinetik_stock/scrapers/example_brand.py` to
+3. Copy `src/kinetik_stock/scrapers/example_brand.py` (a template scraper, only used by the tests) to
    `src/kinetik_stock/scrapers/acme_bikes.py`, rename the class, and rewrite
    `login()` and `fetch_stock()` for that portal's actual login form and
    stock page/table (selectors, status wording, pagination, etc. all differ

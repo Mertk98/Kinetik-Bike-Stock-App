@@ -14,19 +14,6 @@
 # that implements BaseScraper (see scrapers/example_brand.py for a full example).
 
 brands:
-  # DEMO ENTRY: points at the local test fixture (tests/fixtures/example_b2b/),
-  # not a real B2B portal. It exists so `python run.py` produces real output
-  # out of the box, proving the login -> scrape -> CSV pipeline end-to-end.
-  # Once you add your first real brand below, set this one's enabled to false
-  # (or delete it).
-  - key: example_brand
-    name: "Example Brand"
-    portal_url: "tests/fixtures/example_b2b/login.html"
-    scraper: "kinetik_stock.scrapers.example_brand.ExampleBrandScraper"
-    username_env: "EXAMPLE_BRAND_USERNAME"
-    password_env: "EXAMPLE_BRAND_PASSWORD"
-    enabled: true
-
   # Add real brands here, e.g.:
   # - key: acme_bikes
   #   name: "Acme Bikes"
@@ -62,6 +49,7 @@ brands:
     username_env: "SANTA_CRUZ_USERNAME"
     password_env: "SANTA_CRUZ_PASSWORD"
     enabled: false
+    coming_soon: true   # in progress - shown in the GUI but not runnable
 
   # Confirmed working end-to-end by the user against a real live login and
   # scrape (this sandbox itself still can't reach transac.devinci.com to
@@ -105,3 +93,17 @@ brands:
     extra_env:
       dealer_id: "NORCO_DEALER_ID"
     enabled: true
+
+  # In progress - no scraper yet. Listed so they show up in the GUI as
+  # "in progress"; they can't be run until coming_soon is removed.
+  - key: specialized
+    name: "Specialized"
+    portal_url: ""
+    coming_soon: true
+    enabled: false
+
+  - key: forbidden
+    name: "Forbidden"
+    portal_url: ""
+    coming_soon: true
+    enabled: false

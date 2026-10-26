@@ -4,7 +4,7 @@ availability, and write a normalized CSV.
 
 Usage:
     python run.py                          # scrape all enabled brands
-    python run.py --brands example_brand   # scrape just one brand
+    python run.py --brands norco   # scrape just one brand
     python run.py --no-headless            # show the browser (debugging)
     python run.py --output output/stock.csv
 """

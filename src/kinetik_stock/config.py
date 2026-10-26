@@ -27,6 +27,8 @@ class BrandConfig:
     # .env variable holding it.
     extra_env: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    # Brands still being built: listed in the GUI but can't be run.
+    coming_soon: bool = False
 
     @property
     def username(self) -> Optional[str]:
@@ -42,10 +44,10 @@ class BrandConfig:
 
     def missing_credential_envs(self) -> list[str]:
         names = [self.username_env, self.password_env, *self.extra_env.values()]
-        return [name for name in names if not os.environ.get(name)]
+        return [name for name in names if name and not os.environ.get(name)]
 
     def credentials_present(self) -> bool:
-        return not self.missing_credential_envs()
+        return not self.coming_soon and not self.missing_credential_envs()
 
 
 def _resolve_portal_url(portal_url: str) -> str:
@@ -53,7 +55,7 @@ def _resolve_portal_url(portal_url: str) -> str:
     the local demo/test fixture) is resolved to a file:// URI so Playwright
     can open it regardless of the current working directory.
     """
-    if urlparse(portal_url).scheme:
+    if not portal_url or urlparse(portal_url).scheme:
         return portal_url
     return (REPO_ROOT / portal_url).resolve().as_uri()
 
@@ -71,11 +73,12 @@ def load_brand_configs(path: Path = BRANDS_CONFIG_PATH) -> list[BrandConfig]:
                 key=entry["key"],
                 name=entry["name"],
                 portal_url=_resolve_portal_url(entry["portal_url"]),
-                scraper=entry["scraper"],
-                username_env=entry["username_env"],
-                password_env=entry["password_env"],
+                scraper=entry.get("scraper", ""),
+                username_env=entry.get("username_env", ""),
+                password_env=entry.get("password_env", ""),
                 extra_env=entry.get("extra_env", {}),
                 enabled=entry.get("enabled", True),
+                coming_soon=entry.get("coming_soon", False),
             )
         )
     return brands
