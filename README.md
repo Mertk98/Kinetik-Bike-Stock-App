@@ -40,6 +40,32 @@ Output CSVs are written to `output/` by default, one per brand selection
 overwritten on each run rather than piling up. Pass `--output` for a
 different/one-off path.
 
+## GUI (Windows + Android)
+
+```bash
+python gui.py          # or double-click start_gui.bat on Windows
+```
+
+- **On the Windows PC:** open <http://localhost:8080>.
+- **On an Android phone:** connect to the same Wi-Fi and open the
+  `http://<pc-ip>:8080` address printed at startup. In Chrome, menu →
+  *Add to Home screen* installs it like an app.
+
+The scrapers drive a real Chromium browser (Playwright), which can't run on
+Android - so the scraping always happens on the PC, and the phone is a remote
+control for it. The PC has to be on and running `gui.py`; allow Python through
+Windows Firewall on private networks when prompted.
+
+The GUI can start logins to your dealer accounts, so it's password protected:
+set `KINETIK_GUI_PASSWORD` in `.env` (otherwise a random one is printed on each
+start). Use `python gui.py --local-only` to disable phone access. Don't expose
+the port to the internet.
+
+Tabs: **Run** (combined stock CSV, per-brand Norco/Devinci/Santa Cruz reports,
+live log), **Results** (browse/filter/download anything in `output/`), **SKU
+lists** (download/replace each report's input CSV; the old one is kept as
+`.csv.bak`). Dealer credentials are still edited in `.env`, not in the GUI.
+
 ## CSV schema
 
 Kept deliberately lean - across hundreds of SKUs, extra columns add up fast:

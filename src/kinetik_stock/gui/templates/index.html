@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14532d">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+<link rel="icon" href="{{ url_for('static', filename='icon.svg') }}">
+<title>Kinetik Stock</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <h1>Kinetik Stock</h1>
+  <form method="post" action="{{ url_for('logout') }}"><button class="link">Sign out</button></form>
+</header>
+<nav id="tabs">
+  <button data-tab="run" class="active">Run</button>
+  <button data-tab="results">Results</button>
+  <button data-tab="inputs">SKU lists</button>
+</nav>
+
+<main>
+<section id="tab-run">
+  <div class="card">
+    <h2>Combined stock CSV</h2>
+    <p class="muted">Scrapes the brands you tick into one normalized CSV.</p>
+    <div id="brand-list"></div>
+    <button id="run-stock" class="primary">Run selected brands</button>
+  </div>
+  <div class="card">
+    <h2>Per-brand reports</h2>
+    <p class="muted">Uses your SKU list (see the SKU lists tab) and outputs Status / ETA per item.</p>
+    <div id="report-list"></div>
+  </div>
+  <label class="check"><input type="checkbox" id="show-browser"> Show the browser window (only useful on the PC itself, for debugging)</label>
+
+  <div class="card" id="job-card" hidden>
+    <h2 id="job-title"></h2>
+    <p id="job-status" class="status"></p>
+    <pre id="job-log"></pre>
+    <ul id="job-errors" class="err"></ul>
+    <button id="job-open" class="primary" hidden>View results</button>
+  </div>
+</section>
+
+<section id="tab-results" hidden>
+  <div class="card">
+    <select id="file-select"></select>
+    <a id="file-download" class="btn" href="#">Download CSV</a>
+  </div>
+  <div class="card">
+    <input id="filter" type="search" placeholder="Filter rows...">
+    <div class="tablewrap"><table id="table"></table></div>
+    <p id="table-note" class="muted"></p>
+  </div>
+</section>
+
+<section id="tab-inputs" hidden>
+  <div id="input-list"></div>
+</section>
+</main>
+<div id="toast" hidden></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

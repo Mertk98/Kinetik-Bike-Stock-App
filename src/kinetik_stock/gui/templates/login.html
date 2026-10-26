@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14532d">
+<title>Kinetik Stock - Sign in</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login">
+<form method="post" class="card">
+  <h1>Kinetik Stock</h1>
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autofocus autocomplete="current-password">
+  {% if error %}<p class="err">{{ error }}</p>{% endif %}
+  <button class="primary" type="submit">Sign in</button>
+</form>
+</body>
+</html>
