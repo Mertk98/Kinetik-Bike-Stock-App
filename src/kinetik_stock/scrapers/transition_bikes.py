@@ -281,9 +281,17 @@ class TransitionBikesScraper(BaseScraper):
                 LOGGED_IN_SELECTOR, state="visible", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
             )
         except Exception:
+            still_on_form = self.page.query_selector(PASSWORD_SELECTOR) is not None
+            hint = (
+                "the login form is still showing - the portal rejected the "
+                f"login or blocked the automated browser; check "
+                f"{self.brand_config.username_env}/{self.brand_config.password_env}"
+                if still_on_form
+                else "landed on a page without the logout link"
+            )
             raise RuntimeError(
-                f"Login to {self.brand_config.name} failed (no logout link found) - "
-                f"check {self.brand_config.username_env}/{self.brand_config.password_env}."
+                f"Login to {self.brand_config.name} failed: {hint}. "
+                + self.describe_page("transition_bikes_login_failed")
             )
 
     def fetch_stock(self) -> list[StockItem]:
