@@ -29,7 +29,7 @@ const runnable = (b) => !b.coming_soon && b.credentials_present;
 async function loadBrands() {
   ({ brands: brandList } = await api("/api/brands"));
   $("#brand-list").innerHTML = brandList.map((b) => {
-    const note = b.coming_soon ? "" : b.credentials_present ? (b.enabled ? "" : "not enabled by default - runs on request") : "missing in .env: " + esc(b.missing.join(", "));
+    const note = b.coming_soon || b.credentials_present ? "" : "missing in .env: " + esc(b.missing.join(", "));
     return `<div class="row ${b.coming_soon ? "soon" : ""}"><span class="name">${esc(b.name)}<small>${note}</small></span>` +
       (b.coming_soon ? `<span class="badge">In progress</span>` : `<button data-run="${esc(b.key)}" ${runnable(b) ? "" : "disabled"}>Run</button>`) + `</div>`;
   }).join("");
@@ -38,7 +38,7 @@ async function loadBrands() {
 }
 function setBusy(v) {
   busy = v;
-  const any = brandList.some((b) => runnable(b) && b.enabled);
+  const any = brandList.some(runnable);
   $("#run-all").disabled = v || !any;
   document.querySelectorAll("[data-run]").forEach((b) => {
     const brand = brandList.find((x) => x.key === b.dataset.run);
@@ -46,13 +46,13 @@ function setBusy(v) {
   });
 }
 async function start(brands) {
-  const body = { brands, show_browser: $("#show-browser").checked };
+  const body = { brands };
   try { await api("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
   catch (e) { toast(e.message); return; }
   logFrom = 0; $("#job-log").textContent = "";
   poll();
 }
-$("#run-all").addEventListener("click", () => start(brandList.filter((b) => runnable(b) && b.enabled).map((b) => b.key)));
+$("#run-all").addEventListener("click", () => start(brandList.filter(runnable).map((b) => b.key)));
 
 let logFrom = 0, lastJobId = null, pollTimer = null, lastOutput = null;
 async function poll() {
@@ -73,13 +73,24 @@ async function poll() {
     log.scrollTop = log.scrollHeight;
   }
   logFrom = job.log_len;
-  $("#job-errors").innerHTML = job.errors.map((e) => `<li>${esc(e)}</li>`).join("");
+  renderResults(job, running);
   lastOutput = job.outputs[0] || null;
   $("#job-open").hidden = running || !job.outputs.length;
   setBusy(running);
   if (running) pollTimer = setTimeout(poll, 1500);
 }
 $("#job-open").addEventListener("click", () => { showTab("results"); });
+
+// One line per brand: a download link if it produced a file, otherwise why not.
+function renderResults(job, running) {
+  const html = job.results.map((r) => r.ok
+    ? `<div class="row"><span class="name">${esc(r.name)}<small>${r.rows} rows</small></span><a class="btn" href="/download/${encodeURIComponent(r.file)}">Download</a></div>`
+    : `<div class="row"><span class="name">${esc(r.name)}<small class="err">${r.error ? "Failed: " + esc(r.error) : "Running..."}</small></span></div>`).join("");
+  $("#job-results").innerHTML = html;
+  $("#last-run").hidden = !job.results.length;
+  $("#last-run h2").textContent = "Last run - " + job.label + (running ? " (running)" : "");
+  $("#last-run-results").innerHTML = html;
+}
 
 // ---- results tab
 let tableData = { columns: [], rows: [] };

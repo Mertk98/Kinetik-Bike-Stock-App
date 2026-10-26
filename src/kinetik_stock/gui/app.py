@@ -74,7 +74,6 @@ def create_app(username: str, password: str, output_dir: Path | None = None) -> 
     @login_required
     def api_run():
         body = request.get_json(silent=True) or {}
-        headless = not body.get("show_browser", False)
         known = {b["key"]: b for b in jobs.brand_info()}
         keys = body.get("brands")
         if not isinstance(keys, list) or not keys or not set(keys) <= set(known):
@@ -83,7 +82,7 @@ def create_app(username: str, password: str, output_dir: Path | None = None) -> 
             return jsonify(error="That brand is still in progress"), 400
         label = ", ".join(known[k]["name"] for k in keys) if len(keys) <= 2 else f"{len(keys)} brands"
         try:
-            job = manager.start(label, jobs.make_brand_work(keys, headless))
+            job = manager.start(label, jobs.make_brand_work(keys))
         except Busy as exc:
             return jsonify(error=str(exc)), 409
         return jsonify(job=job.to_dict())

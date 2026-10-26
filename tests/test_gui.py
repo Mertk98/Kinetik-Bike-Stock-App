@@ -52,7 +52,7 @@ def test_job_runs_and_rejects_concurrent(client):
     job = manager.start("t", slow)
     with pytest.raises(jobs.Busy):
         manager.start("t2", slow)
-    assert client.post("/api/run", json={"brands": ["example_brand"]}).status_code == 409
+    assert client.post("/api/run", json={"brands": ["devinci"]}).status_code == 409
     for _ in range(50):
         if job.status in ("done", "failed"):
             break
@@ -89,43 +89,58 @@ def test_in_progress_brands_listed_but_not_runnable(client):
     assert client.post("/api/run", json={"brands": ["santa_cruz", "norco"]}).status_code == 400
 
 
-def test_each_brand_writes_its_own_file(client, tmp_path, monkeypatch):
-    from kinetik_stock.models import StockItem, StockStatus
+def _wait(job):
+    for _ in range(100):
+        if job.status in ("done", "failed"):
+            return
+        time.sleep(0.05)
 
-    out = tmp_path / "out"
-    monkeypatch.setattr(jobs, "OUTPUT_DIR", out)
+
+def test_each_brand_writes_its_own_file(client, monkeypatch):
     calls = []
-
-    def fake_run_all(only_keys, headless):
-        calls.append(only_keys)
-        return [StockItem(brand=only_keys[0], sku="S", product_title="T", status=StockStatus.IN_STOCK)], []
-
-    monkeypatch.setattr("kinetik_stock.runner.run_all", fake_run_all)
-    monkeypatch.setenv("EXAMPLE_BRAND_USERNAME", "u")
-    monkeypatch.setenv("EXAMPLE_BRAND_PASSWORD", "p")
-    monkeypatch.setenv("TRANSITION_BIKES_USERNAME", "u")
-    monkeypatch.setenv("TRANSITION_BIKES_PASSWORD", "p")
+    monkeypatch.setattr(jobs, "_run_stock", lambda key, headless: (calls.append(key), (f"stock_{key}.csv", 2))[1])
+    monkeypatch.setattr(jobs, "_run_report", lambda key, headless: (calls.append(key), (f"{key}_report.csv", 5))[1])
+    for var in ("TRANSITION_BIKES", "NORCO", "DEVINCI"):
+        monkeypatch.setenv(f"{var}_USERNAME", "u")
+        monkeypatch.setenv(f"{var}_PASSWORD", "p")
+    monkeypatch.setenv("NORCO_DEALER_ID", "d")
     job = client.app.extensions["job_manager"].start(
-        "t", jobs.make_brand_work(["example_brand", "transition_bikes"], True)
+        "t", jobs.make_brand_work(["transition_bikes", "norco", "devinci"])
     )
-    for _ in range(100):
-        if job.status in ("done", "failed"):
-            break
-        time.sleep(0.05)
-    assert calls == [["example_brand"], ["transition_bikes"]]
-    assert job.outputs == ["stock_example_brand.csv", "stock_transition_bikes.csv"]
-    assert {p.name for p in out.glob("*.csv")} == set(job.outputs)
+    _wait(job)
+    assert calls == ["transition_bikes", "norco", "devinci"]
+    assert job.outputs == ["stock_transition_bikes.csv", "norco_report.csv", "devinci_report.csv"]
+    assert [r["ok"] for r in job.results] == [True, True, True]
+    assert job.rows == 12 and job.status == "done"
 
 
-def test_missing_credentials_fail_one_brand_not_all(client, tmp_path, monkeypatch):
-    monkeypatch.setattr(jobs, "OUTPUT_DIR", tmp_path / "out")
+def test_one_failing_brand_does_not_stop_the_rest(client, monkeypatch):
+    def report(key, headless):
+        if key == "norco":
+            raise RuntimeError("login failed")
+        return f"{key}_report.csv", 1
+
+    monkeypatch.setattr(jobs, "_run_report", report)
+    for var in ("NORCO", "DEVINCI"):
+        monkeypatch.setenv(f"{var}_USERNAME", "u")
+        monkeypatch.setenv(f"{var}_PASSWORD", "p")
+    monkeypatch.setenv("NORCO_DEALER_ID", "d")
+    job = client.app.extensions["job_manager"].start("t", jobs.make_brand_work(["norco", "devinci"]))
+    _wait(job)
+    assert job.status == "done" and job.outputs == ["devinci_report.csv"]
+    norco, devinci = job.results
+    assert not norco["ok"] and norco["error"] == "login failed" and devinci["ok"]
+
+
+def test_missing_credentials_reported_per_brand(client, monkeypatch):
     monkeypatch.delenv("NORCO_USERNAME", raising=False)
-    job = client.app.extensions["job_manager"].start("t", jobs.make_brand_work(["norco"], True))
-    for _ in range(100):
-        if job.status in ("done", "failed"):
-            break
-        time.sleep(0.05)
-    assert job.status == "failed" and "Missing credentials" in job.errors[0]
+    job = client.app.extensions["job_manager"].start("t", jobs.make_brand_work(["norco"]))
+    _wait(job)
+    assert job.status == "failed" and "Missing credentials" in job.results[0]["error"]
+
+
+def test_example_brand_is_gone(client):
+    assert "example_brand" not in {b["key"] for b in client.get("/api/brands").json["brands"]}
 
 
 def test_upload_input_validates(client, tmp_path, monkeypatch):

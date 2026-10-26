@@ -29,7 +29,7 @@ cp .env.example .env          # then fill in real credentials
 
 ```bash
 python run.py                          # scrape all enabled brands
-python run.py --brands example_brand   # scrape just one brand
+python run.py --brands norco   # scrape just one brand
 python run.py --no-headless            # show the browser window (debugging)
 python run.py --output output/stock.csv
 python run.py -v                       # verbose/debug logging
@@ -89,18 +89,6 @@ still captured on each `StockItem` in code, just not written to the CSV.
 Tell me if you want any of that back as a column, or want fewer/different
 ones once you've seen how Timesact Pre-Order's import expects the data.
 
-## Included demo brand
-
-`config/brands.yaml` ships with an `example_brand` entry that points at a
-local test fixture (`tests/fixtures/example_b2b/`), not a real B2B site. It
-exists so `python run.py` produces real, correct output immediately, and so
-you can see the whole login → scrape → CSV pipeline work. Its "credentials"
-(`demo_user` / `demo_pass` in `.env.example`) aren't secret — they're
-hardcoded in the fixture HTML.
-
-Once you add your first real brand, set `example_brand`'s `enabled: false` in
-`config/brands.yaml` (or delete the entry).
-
 ## Adding a real brand
 
 1. Add credentials to `.env`:
@@ -118,7 +106,7 @@ Once you add your first real brand, set `example_brand`'s `enabled: false` in
      password_env: "ACME_BIKES_PASSWORD"
      enabled: true
    ```
-3. Copy `src/kinetik_stock/scrapers/example_brand.py` to
+3. Copy `src/kinetik_stock/scrapers/example_brand.py` (a template scraper, only used by the tests) to
    `src/kinetik_stock/scrapers/acme_bikes.py`, rename the class, and rewrite
    `login()` and `fetch_stock()` for that portal's actual login form and
    stock page/table (selectors, status wording, pagination, etc. all differ

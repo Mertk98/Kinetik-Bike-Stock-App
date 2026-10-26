@@ -56,6 +56,8 @@ class Job:
     outputs: list[str] = field(default_factory=list)  # file names inside output/, one per brand
     rows: int = 0
     errors: list[str] = field(default_factory=list)
+    # One entry per brand: {key, name, ok, file, rows, error}
+    results: list[dict] = field(default_factory=list)
 
     def say(self, line: str) -> None:
         self.log.append(line)
@@ -70,6 +72,7 @@ class Job:
             "outputs": self.outputs,
             "rows": self.rows,
             "errors": self.errors,
+            "results": self.results,
             "log": self.log[log_from:],
             "log_len": len(self.log),
         }
@@ -144,20 +147,19 @@ def input_csv_path(key: str) -> Path:
     return getattr(importlib.import_module(module), const)
 
 
-def _run_stock(key: str, headless: bool, job: Job) -> None:
+def _run_stock(key: str, headless: bool) -> tuple[str, int]:
     """Brands without a per-brand report format: that brand's own stock CSV."""
     from kinetik_stock.runner import run_all
 
     items, errors = run_all(only_keys=[key], headless=headless)
+    if errors:
+        raise RuntimeError("; ".join(m for _k, m in errors))
     name = f"stock_{key}.csv"
     write_csv(items, OUTPUT_DIR / name)
-    job.outputs.append(name)
-    job.rows += len(items)
-    job.errors.extend(f"{k}: {m}" for k, m in errors)
-    job.say(f"Wrote {len(items)} rows to output/{name}")
+    return name, len(items)
 
 
-def _run_report(key: str, headless: bool, job: Job) -> None:
+def _run_report(key: str, headless: bool) -> tuple[str, int]:
     from playwright.sync_api import sync_playwright
 
     from kinetik_stock.browser import launch_chromium
@@ -177,28 +179,34 @@ def _run_report(key: str, headless: bool, job: Job) -> None:
         finally:
             browser.close()
     getattr(mod, writer)(rows, OUTPUT_DIR / out_name)
-    job.outputs.append(out_name)
-    job.rows += len(rows)
-    job.say(f"Wrote {len(rows)} rows to output/{out_name}")
+    return out_name, len(rows)
 
 
-def make_brand_work(keys: list[str], headless: bool) -> Callable[[Job], None]:
+def make_brand_work(keys: list[str], headless: bool = True) -> Callable[[Job], None]:
     """Runs each brand on its own and writes one report file per brand -
-    a failure in one brand doesn't stop the rest."""
+    a failure in one brand doesn't stop the rest. Every brand gets an entry
+    in job.results saying whether it produced a file or why not."""
 
     def work(job: Job) -> None:
         brands = {b.key: b for b in load_brand_configs()}
         for key in keys:
             brand = brands[key]
             job.say(f"=== {brand.name} ===")
+            result = {"key": key, "name": brand.name, "ok": False, "file": None, "rows": 0, "error": None}
+            job.results.append(result)
             try:
                 if not brand.credentials_present():
                     raise RuntimeError(
                         f"Missing credentials: set {', '.join(brand.missing_credential_envs())} in .env"
                     )
-                (_run_report if key in REPORTS else _run_stock)(key, headless, job)
+                name, rows = (_run_report if key in REPORTS else _run_stock)(key, headless)
+                result.update(ok=True, file=name, rows=rows)
+                job.outputs.append(name)
+                job.rows += rows
+                job.say(f"Wrote {rows} rows to output/{name}")
             except Exception as exc:
                 logging.getLogger(__name__).exception("Failed: %s", brand.name)
-                job.errors.append(f"{brand.name}: {exc}")
+                result["error"] = str(exc) or exc.__class__.__name__
+                job.errors.append(f"{brand.name}: {result['error']}")
 
     return work

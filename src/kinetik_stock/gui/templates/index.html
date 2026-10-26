@@ -29,18 +29,21 @@
     <button id="run-all" class="primary">Run all available brands</button>
     <p class="muted" style="margin-top:8px">Brands run one after another, each writing its own file.</p>
   </div>
-  <label class="check"><input type="checkbox" id="show-browser"> Show the browser window (only useful on the PC itself, for debugging)</label>
 
   <div class="card" id="job-card" hidden>
     <h2 id="job-title"></h2>
     <p id="job-status" class="status"></p>
     <pre id="job-log"></pre>
-    <ul id="job-errors" class="err"></ul>
-    <button id="job-open" class="primary" hidden>View results</button>
+    <div id="job-results"></div>
+    <button id="job-open" class="primary" hidden>Open Results page</button>
   </div>
 </section>
 
 <section id="tab-results" hidden>
+  <div class="card" id="last-run" hidden>
+    <h2>Last run</h2>
+    <div id="last-run-results"></div>
+  </div>
   <div class="card">
     <select id="file-select"></select>
     <a id="file-download" class="btn" href="#">Download CSV</a>
