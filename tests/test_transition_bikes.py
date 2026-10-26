@@ -203,3 +203,36 @@ def test_fetch_eta_date_falls_back_to_closeout_page(monkeypatch, tmp_path):
                 scraper.close()
         finally:
             browser.close()
+
+
+def test_build_kit_click_survives_popups_covering_the_page(tmp_path):
+    # Mirrors what the live storefront does: a fixed full-screen Klaviyo
+    # popup and a compliance bar sit on top of the build-kit selector.
+    page_file = tmp_path / "product.html"
+    page_file.write_text(
+        """
+        <div id="dataComplianceHandle"><div id="dataComplianceContainer"
+             style="position:fixed;inset:0;z-index:99">cookies</div></div>
+        <div style="position:fixed;inset:0;z-index:100">
+          <div class="needsclick kl-private-reset-css-Xuajs1" style="width:100%;height:100%">popup</div>
+        </div>
+        <div class="selectProductBike" onclick="window.picked='Carbon AXS'"><span class="theItemName">Carbon AXS</span></div>
+        <div class="selectProductBike" onclick="window.picked='Carbon GX'"><span class="theItemName">Carbon GX</span></div>
+        <div refColor="Sandstone" refColorCode="c2a87d" class="BikeColor"></div>
+        <div refMessage=" SHIPS APPX: 9/25/26" class="ProductSelectorBox c2a87d" refNameText="Small ">Small</div>
+        """
+    )
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=True)
+        try:
+            scraper = TransitionBikesScraper(make_brand_config(), browser)
+            try:
+                result = scraper._read_eta_from_page(
+                    page_file.resolve().as_uri(), "Carbon GX", "Sandstone", "Small"
+                )
+                assert result == (True, "2026-09-25")
+                assert scraper.page.evaluate("window.picked") == "Carbon GX"
+            finally:
+                scraper.close()
+        finally:
+            browser.close()
