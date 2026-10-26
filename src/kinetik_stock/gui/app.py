@@ -22,7 +22,7 @@ from kinetik_stock.gui.jobs import Busy, JobManager
 MAX_PREVIEW_ROWS = 5000
 
 
-def create_app(password: str, output_dir: Path | None = None) -> Flask:
+def create_app(username: str, password: str, output_dir: Path | None = None) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secrets.token_hex(32)
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -46,10 +46,13 @@ def create_app(password: str, output_dir: Path | None = None) -> Flask:
     def login():
         error = None
         if request.method == "POST":
-            if hmac.compare_digest(request.form.get("password", ""), password):
+            # compare both fields so timing doesn't reveal which one was wrong
+            user_ok = hmac.compare_digest(request.form.get("username", "").strip().lower().encode(), username.lower().encode())
+            pass_ok = hmac.compare_digest(request.form.get("password", "").encode(), password.encode())
+            if user_ok and pass_ok:
                 session["ok"] = True
                 return redirect(url_for("index"))
-            error = "Wrong password"
+            error = "Wrong email or password"
         return render_template("login.html", error=error), (401 if error else 200)
 
     @app.post("/logout")
@@ -73,21 +76,14 @@ def create_app(password: str, output_dir: Path | None = None) -> Flask:
         body = request.get_json(silent=True) or {}
         headless = not body.get("show_browser", False)
         known = {b["key"]: b for b in jobs.brand_info()}
-        kind = body.get("kind")
+        keys = body.get("brands")
+        if not isinstance(keys, list) or not keys or not set(keys) <= set(known):
+            return jsonify(error="pick one or more known brands"), 400
+        if any(known[k]["coming_soon"] for k in keys):
+            return jsonify(error="That brand is still in progress"), 400
+        label = ", ".join(known[k]["name"] for k in keys) if len(keys) <= 2 else f"{len(keys)} brands"
         try:
-            if kind == "stock":
-                keys = body.get("brands") or None
-                if keys and not set(keys) <= set(known):
-                    return jsonify(error="unknown brand"), 400
-                label = "Stock: " + (", ".join(known[k]["name"] for k in keys) if keys else "all enabled brands")
-                job = manager.start(label, jobs.make_stock_work(keys, headless))
-            elif kind == "report":
-                key = body.get("brand")
-                if key not in jobs.REPORTS:
-                    return jsonify(error="no report for that brand"), 400
-                job = manager.start(f"Report: {known[key]['name']}", jobs.make_report_work(key, headless))
-            else:
-                return jsonify(error="kind must be 'stock' or 'report'"), 400
+            job = manager.start(label, jobs.make_brand_work(keys, headless))
         except Busy as exc:
             return jsonify(error=str(exc)), 409
         return jsonify(job=job.to_dict())

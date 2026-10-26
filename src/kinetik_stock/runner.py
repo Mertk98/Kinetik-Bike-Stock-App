@@ -19,6 +19,7 @@ def select_brands(
     # and overrides `enabled: false` - useful for testing a brand that isn't
     # ready for full/bulk runs yet. A bare run (no --brands) only picks up
     # enabled brands.
+    brands = [b for b in brands if not b.coming_soon]
     if only_keys:
         wanted = set(only_keys)
         return [b for b in brands if b.key in wanted]

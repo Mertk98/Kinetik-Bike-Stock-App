@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#14532d">
+<meta name="theme-color" content="#e10600">
 <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
 <link rel="icon" href="{{ url_for('static', filename='icon.svg') }}">
 <title>Kinetik Stock</title>
@@ -23,15 +23,11 @@
 <main>
 <section id="tab-run">
   <div class="card">
-    <h2>Combined stock CSV</h2>
-    <p class="muted">Scrapes the brands you tick into one normalized CSV.</p>
+    <h2>Brands</h2>
+    <p class="muted">Each brand gets its own report - nothing is combined.</p>
     <div id="brand-list"></div>
-    <button id="run-stock" class="primary">Run selected brands</button>
-  </div>
-  <div class="card">
-    <h2>Per-brand reports</h2>
-    <p class="muted">Uses your SKU list (see the SKU lists tab) and outputs Status / ETA per item.</p>
-    <div id="report-list"></div>
+    <button id="run-all" class="primary">Run all available brands</button>
+    <p class="muted" style="margin-top:8px">Brands run one after another, each writing its own file.</p>
   </div>
   <label class="check"><input type="checkbox" id="show-browser"> Show the browser window (only useful on the PC itself, for debugging)</label>
 

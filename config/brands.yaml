@@ -62,6 +62,7 @@ brands:
     username_env: "SANTA_CRUZ_USERNAME"
     password_env: "SANTA_CRUZ_PASSWORD"
     enabled: false
+    coming_soon: true   # in progress - shown in the GUI but not runnable
 
   # Confirmed working end-to-end by the user against a real live login and
   # scrape (this sandbox itself still can't reach transac.devinci.com to
@@ -105,3 +106,17 @@ brands:
     extra_env:
       dealer_id: "NORCO_DEALER_ID"
     enabled: true
+
+  # In progress - no scraper yet. Listed so they show up in the GUI as
+  # "in progress"; they can't be run until coming_soon is removed.
+  - key: specialized
+    name: "Specialized"
+    portal_url: ""
+    coming_soon: true
+    enabled: false
+
+  - key: forbidden
+    name: "Forbidden"
+    portal_url: ""
+    coming_soon: true
+    enabled: false

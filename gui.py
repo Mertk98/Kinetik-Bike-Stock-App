@@ -7,8 +7,8 @@ is printed on startup), then "Add to Home screen" in Chrome.
 
 The scrapers drive a real Chromium browser, so they run on this PC - the
 phone is only a remote control. Because the GUI can start logins to your
-dealer accounts, it's protected by a password: set KINETIK_GUI_PASSWORD in
-.env, otherwise a random one is generated and printed on each start.
+dealer accounts, it's protected by a login: set KINETIK_GUI_USERNAME and
+KINETIK_GUI_PASSWORD in .env, otherwise a random one is generated and printed on each start.
 
 Usage:
     python gui.py
@@ -48,6 +48,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_dotenv(REPO_ROOT / ".env", override=False)
+    username = os.environ.get("KINETIK_GUI_USERNAME", "sales@kinetikcycles.com")
     password = os.environ.get("KINETIK_GUI_PASSWORD")
     generated = not password
     if generated:
@@ -57,12 +58,12 @@ def main() -> int:
     print(f"\nKinetik Stock GUI\n  This PC:  http://localhost:{args.port}")
     if not args.local_only and (ip := lan_ip()):
         print(f"  Phone:    http://{ip}:{args.port}   (same Wi-Fi)")
-    print(f"  Password: {password}" + ("   (random - set KINETIK_GUI_PASSWORD in .env to keep one)" if generated else ""))
+    print(f"  Login:    {username}\n  Password: {password}" + ("   (random - set KINETIK_GUI_PASSWORD in .env to keep one)" if generated else ""))
     print("  Ctrl+C to stop\n")
 
     from waitress import serve  # production server; Flask's dev server isn't meant for LAN use
 
-    serve(create_app(password), host=host, port=args.port, threads=4)
+    serve(create_app(username, password), host=host, port=args.port, threads=4)
     return 0
 
 

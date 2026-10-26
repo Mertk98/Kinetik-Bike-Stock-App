@@ -53,7 +53,7 @@ class Job:
     started: float = field(default_factory=time.time)
     finished: Optional[float] = None
     log: list[str] = field(default_factory=list)
-    output: Optional[str] = None  # file name inside output/
+    outputs: list[str] = field(default_factory=list)  # file names inside output/, one per brand
     rows: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -67,7 +67,7 @@ class Job:
             "status": self.status,
             "started": self.started,
             "finished": self.finished,
-            "output": self.output,
+            "outputs": self.outputs,
             "rows": self.rows,
             "errors": self.errors,
             "log": self.log[log_from:],
@@ -111,7 +111,7 @@ class JobManager:
         pkg_logger.addHandler(handler)
         try:
             work(job)
-            job.status = "failed" if (job.errors and not job.rows) else "done"
+            job.status = "failed" if (job.errors and not job.outputs) else "done"
         except Exception as exc:  # surfaced in the GUI instead of killing the thread
             logging.getLogger(__name__).exception("Job failed")
             job.errors.append(str(exc))
@@ -132,7 +132,8 @@ def brand_info() -> list[dict]:
                 "enabled": b.enabled,
                 "credentials_present": b.credentials_present(),
                 "missing": b.missing_credential_envs(),
-                "has_report": b.key in REPORTS,
+                "coming_soon": b.coming_soon,
+                "report": b.key in REPORTS,
             }
         )
     return out
@@ -143,47 +144,61 @@ def input_csv_path(key: str) -> Path:
     return getattr(importlib.import_module(module), const)
 
 
-def make_stock_work(keys: Optional[list[str]], headless: bool) -> Callable[[Job], None]:
-    def work(job: Job) -> None:
-        from kinetik_stock.runner import run_all
+def _run_stock(key: str, headless: bool, job: Job) -> None:
+    """Brands without a per-brand report format: that brand's own stock CSV."""
+    from kinetik_stock.runner import run_all
 
-        items, errors = run_all(only_keys=keys, headless=headless)
-        label = "_".join(sorted(keys)) if keys else "all"
-        name = f"stock_{label}.csv"
-        write_csv(items, OUTPUT_DIR / name)
-        job.output, job.rows = name, len(items)
-        job.errors.extend(f"{k}: {m}" for k, m in errors)
-        job.say(f"Wrote {len(items)} rows to output/{name}")
-
-    return work
+    items, errors = run_all(only_keys=[key], headless=headless)
+    name = f"stock_{key}.csv"
+    write_csv(items, OUTPUT_DIR / name)
+    job.outputs.append(name)
+    job.rows += len(items)
+    job.errors.extend(f"{k}: {m}" for k, m in errors)
+    job.say(f"Wrote {len(items)} rows to output/{name}")
 
 
-def make_report_work(key: str, headless: bool) -> Callable[[Job], None]:
-    def work(job: Job) -> None:
-        from playwright.sync_api import sync_playwright
+def _run_report(key: str, headless: bool, job: Job) -> None:
+    from playwright.sync_api import sync_playwright
 
-        from kinetik_stock.browser import launch_chromium
+    from kinetik_stock.browser import launch_chromium
 
-        module, cls, writer, _const, out_name = REPORTS[key]
-        mod = importlib.import_module(module)
-        brand = next(b for b in load_brand_configs() if b.key == key)
-        if not brand.credentials_present():
-            raise RuntimeError(
-                f"Missing credentials for {key}: set {', '.join(brand.missing_credential_envs())} in .env"
-            )
-        with sync_playwright() as p:
-            browser = launch_chromium(p, headless=headless)
+    module, cls, writer, _const, out_name = REPORTS[key]
+    mod = importlib.import_module(module)
+    brand = next(b for b in load_brand_configs() if b.key == key)
+    with sync_playwright() as p:
+        browser = launch_chromium(p, headless=headless)
+        try:
+            scraper = getattr(mod, cls)(brand, browser, headless=headless)
+            scraper.login()
             try:
-                scraper = getattr(mod, cls)(brand, browser, headless=headless)
-                scraper.login()
-                try:
-                    rows = scraper.generate_availability_report(input_csv_path(key))
-                finally:
-                    scraper.close()
+                rows = scraper.generate_availability_report(input_csv_path(key))
             finally:
-                browser.close()
-        getattr(mod, writer)(rows, OUTPUT_DIR / out_name)
-        job.output, job.rows = out_name, len(rows)
-        job.say(f"Wrote {len(rows)} rows to output/{out_name}")
+                scraper.close()
+        finally:
+            browser.close()
+    getattr(mod, writer)(rows, OUTPUT_DIR / out_name)
+    job.outputs.append(out_name)
+    job.rows += len(rows)
+    job.say(f"Wrote {len(rows)} rows to output/{out_name}")
+
+
+def make_brand_work(keys: list[str], headless: bool) -> Callable[[Job], None]:
+    """Runs each brand on its own and writes one report file per brand -
+    a failure in one brand doesn't stop the rest."""
+
+    def work(job: Job) -> None:
+        brands = {b.key: b for b in load_brand_configs()}
+        for key in keys:
+            brand = brands[key]
+            job.say(f"=== {brand.name} ===")
+            try:
+                if not brand.credentials_present():
+                    raise RuntimeError(
+                        f"Missing credentials: set {', '.join(brand.missing_credential_envs())} in .env"
+                    )
+                (_run_report if key in REPORTS else _run_stock)(key, headless, job)
+            except Exception as exc:
+                logging.getLogger(__name__).exception("Failed: %s", brand.name)
+                job.errors.append(f"{brand.name}: {exc}")
 
     return work

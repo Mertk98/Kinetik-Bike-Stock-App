@@ -24,38 +24,35 @@ function showTab(name) {
 document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 
 // ---- run tab
-let busy = false;
+let busy = false, brandList = [];
+const runnable = (b) => !b.coming_soon && b.credentials_present;
 async function loadBrands() {
-  const { brands } = await api("/api/brands");
-  $("#brand-list").innerHTML = brands.map((b) => `
-    <label class="row">
-      <input type="checkbox" value="${esc(b.key)}" ${b.enabled && b.credentials_present ? "checked" : ""} ${b.credentials_present ? "" : "disabled"}>
-      <span class="name">${esc(b.name)}<small>${b.credentials_present ? (b.enabled ? "" : "disabled in brands.yaml (runs if ticked)") : "missing in .env: " + esc(b.missing.join(", "))}</small></span>
-    </label>`).join("");
-  $("#report-list").innerHTML = brands.filter((b) => b.has_report).map((b) => `
-    <div class="row"><span class="name">${esc(b.name)}</span>
-    <button data-report="${esc(b.key)}" ${b.credentials_present ? "" : "disabled"}>Run report</button></div>`).join("");
-  document.querySelectorAll("[data-report]").forEach((btn) =>
-    btn.addEventListener("click", () => start({ kind: "report", brand: btn.dataset.report })));
+  ({ brands: brandList } = await api("/api/brands"));
+  $("#brand-list").innerHTML = brandList.map((b) => {
+    const note = b.coming_soon ? "" : b.credentials_present ? (b.enabled ? "" : "not enabled by default - runs on request") : "missing in .env: " + esc(b.missing.join(", "));
+    return `<div class="row ${b.coming_soon ? "soon" : ""}"><span class="name">${esc(b.name)}<small>${note}</small></span>` +
+      (b.coming_soon ? `<span class="badge">In progress</span>` : `<button data-run="${esc(b.key)}" ${runnable(b) ? "" : "disabled"}>Run</button>`) + `</div>`;
+  }).join("");
+  document.querySelectorAll("[data-run]").forEach((btn) => btn.addEventListener("click", () => start([btn.dataset.run])));
   setBusy(busy);
 }
 function setBusy(v) {
   busy = v;
-  $("#run-stock").disabled = v;
-  document.querySelectorAll("[data-report]").forEach((b) => { if (v) b.disabled = true; });
+  const any = brandList.some((b) => runnable(b) && b.enabled);
+  $("#run-all").disabled = v || !any;
+  document.querySelectorAll("[data-run]").forEach((b) => {
+    const brand = brandList.find((x) => x.key === b.dataset.run);
+    b.disabled = v || !(brand && runnable(brand));
+  });
 }
-async function start(body) {
-  body.show_browser = $("#show-browser").checked;
+async function start(brands) {
+  const body = { brands, show_browser: $("#show-browser").checked };
   try { await api("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
   catch (e) { toast(e.message); return; }
   logFrom = 0; $("#job-log").textContent = "";
   poll();
 }
-$("#run-stock").addEventListener("click", () => {
-  const brands = [...document.querySelectorAll("#brand-list input:checked")].map((i) => i.value);
-  if (!brands.length) return toast("Tick at least one brand");
-  start({ kind: "stock", brands });
-});
+$("#run-all").addEventListener("click", () => start(brandList.filter((b) => runnable(b) && b.enabled).map((b) => b.key)));
 
 let logFrom = 0, lastJobId = null, pollTimer = null, lastOutput = null;
 async function poll() {
@@ -77,8 +74,8 @@ async function poll() {
   }
   logFrom = job.log_len;
   $("#job-errors").innerHTML = job.errors.map((e) => `<li>${esc(e)}</li>`).join("");
-  lastOutput = job.output;
-  $("#job-open").hidden = running || !job.output;
+  lastOutput = job.outputs[0] || null;
+  $("#job-open").hidden = running || !job.outputs.length;
   setBusy(running);
   if (running) pollTimer = setTimeout(poll, 1500);
 }

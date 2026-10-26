@@ -56,13 +56,15 @@ Android - so the scraping always happens on the PC, and the phone is a remote
 control for it. The PC has to be on and running `gui.py`; allow Python through
 Windows Firewall on private networks when prompted.
 
-The GUI can start logins to your dealer accounts, so it's password protected:
-set `KINETIK_GUI_PASSWORD` in `.env` (otherwise a random one is printed on each
-start). Use `python gui.py --local-only` to disable phone access. Don't expose
+The GUI can start logins to your dealer accounts, so it needs a login: set
+`KINETIK_GUI_PASSWORD` in `.env` (and optionally `KINETIK_GUI_USERNAME`, which
+defaults to `sales@kinetikcycles.com`); without a password, a random one is
+printed on each start. Use `python gui.py --local-only` to disable phone access. Don't expose
 the port to the internet.
 
-Tabs: **Run** (combined stock CSV, per-brand Norco/Devinci/Santa Cruz reports,
-live log), **Results** (browse/filter/download anything in `output/`), **SKU
+Tabs: **Run** (one report per brand - Norco, Devinci etc. each write their own
+file, never combined; "Run all" just runs them one after another; brands still
+in progress show as such and can't be run; live log), **Results** (browse/filter/download anything in `output/`), **SKU
 lists** (download/replace each report's input CSV; the old one is kept as
 `.csv.bak`). Dealer credentials are still edited in `.env`, not in the GUI.
 
