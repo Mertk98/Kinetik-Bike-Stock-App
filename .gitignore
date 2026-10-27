@@ -6,3 +6,4 @@ output/*.csv
 .venv/
 venv/
 output/debug/
+private/
