@@ -250,6 +250,21 @@ def parse_eta_message(message: str) -> Optional[str]:
     return f"{year_int:04d}-{int(month):02d}-{int(day):02d}"
 
 
+# The public storefront (where ETAs are read) throws a Klaviyo newsletter
+# popup and a cookie/compliance bar over the page, which intercept clicks
+# on the build-kit selector (seen live: "subtree intercepts pointer
+# events"). Remove them from the DOM - they're irrelevant to a scrape.
+_REMOVE_OVERLAYS_JS = """() => {
+  document.querySelectorAll('#dataComplianceContainer, #dataComplianceHandle')
+    .forEach((el) => el.remove());
+  document.querySelectorAll('[class*="kl-private-reset-css"]').forEach((el) => {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      if (getComputedStyle(n).position === 'fixed') { n.remove(); return; }
+    }
+  });
+}"""
+
+
 class TransitionBikesScraper(BaseScraper):
     """Scraper for Transition Bikes' B2B dealer portal
     (https://b2b.transitionbikes.com/Account).
@@ -281,9 +296,17 @@ class TransitionBikesScraper(BaseScraper):
                 LOGGED_IN_SELECTOR, state="visible", timeout=LOGGED_IN_CHECK_TIMEOUT_MS
             )
         except Exception:
+            still_on_form = self.page.query_selector(PASSWORD_SELECTOR) is not None
+            hint = (
+                "the login form is still showing - the portal rejected the "
+                f"login or blocked the automated browser; check "
+                f"{self.brand_config.username_env}/{self.brand_config.password_env}"
+                if still_on_form
+                else "landed on a page without the logout link"
+            )
             raise RuntimeError(
-                f"Login to {self.brand_config.name} failed (no logout link found) - "
-                f"check {self.brand_config.username_env}/{self.brand_config.password_env}."
+                f"Login to {self.brand_config.name} failed: {hint}. "
+                + self.describe_page("transition_bikes_login_failed")
             )
 
     def fetch_stock(self) -> list[StockItem]:
@@ -339,11 +362,25 @@ class TransitionBikesScraper(BaseScraper):
             if status == StockStatus.PRE_ORDER and size and color:
                 bike_name, build_kit = parse_bike_name_and_build_kit(product_title)
                 bike_name = apply_sentinel_youth_override(bike_name, size)
-                item.eta_date = self._fetch_eta_date(bike_name, build_kit or "", color, size)
+                try:
+                    item.eta_date = self._fetch_eta_date(
+                        bike_name, build_kit or "", color, size
+                    )
+                except Exception:
+                    # One bad ETA lookup shouldn't throw away the whole
+                    # brand's results - leave this item's ETA blank.
+                    logger.exception("ETA lookup failed for %s", part_number)
+                    self._eta_page_url = self._eta_build_kit = None
 
             items.append(item)
 
         return items
+
+    def _clear_overlays(self) -> None:
+        try:
+            self.page.evaluate(_REMOVE_OVERLAYS_JS)
+        except Exception:
+            logger.debug("Couldn't clear page overlays", exc_info=True)
 
     def _fetch_eta_date(
         self, bike_name: str, build_kit: str, color: str, size: str
@@ -381,6 +418,7 @@ class TransitionBikesScraper(BaseScraper):
         """
         if self._eta_page_url != product_url:
             self.page.goto(product_url)
+            self._clear_overlays()
             self._eta_page_url = product_url
             self._eta_build_kit = None  # fresh page load, no build selected yet
 
@@ -400,8 +438,12 @@ class TransitionBikesScraper(BaseScraper):
                         target = option
                         break
                 if target is not None:
-                    target.click()
+                    # el.click() fires the page's own click handler without
+                    # needing the element to be hittable, so a popup that
+                    # slips past _clear_overlays can't block it.
+                    target.evaluate("el => el.click()")
                     self.page.wait_for_load_state("networkidle")
+                    self._clear_overlays()
                 else:
                     logger.debug(
                         "No build kit option matched %r on %s", build_kit, product_url

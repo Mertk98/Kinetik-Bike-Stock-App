@@ -28,7 +28,8 @@ def test_requires_login(tmp_path):
     good = {"username": "Sales@KinetikCycles.com", "password": "pw"}
     assert c.post("/login", data={**good, "password": "nope"}).status_code == 401
     assert c.post("/login", data={**good, "username": "other@x.com"}).status_code == 401
-    assert c.post("/login", data=good).status_code == 302
+    resp = c.post("/login", data=good)
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/welcome")
     assert c.get("/").status_code == 200
 
 
@@ -158,3 +159,54 @@ def test_upload_input_validates(client, tmp_path, monkeypatch):
     assert target.read_text().count("\n") == 3
     assert target.with_suffix(".csv.bak").exists()
     assert client.get("/api/inputs").json["inputs"][0]["rows"] == 2
+
+
+def _logged_in(tmp_path, private):
+    c = create_app("sales@kinetikcycles.com", "pw", output_dir=tmp_path, private_dir=private).test_client()
+    c.post("/login", data={"username": "sales@kinetikcycles.com", "password": "pw"})
+    return c
+
+
+def test_welcome_page_needs_login_and_works_without_a_photo(tmp_path):
+    anon = create_app("sales@kinetikcycles.com", "pw", output_dir=tmp_path, private_dir=tmp_path / "none").test_client()
+    assert anon.get("/welcome").status_code == 302
+    assert anon.get("/greeting-photo").status_code == 302
+
+    c = _logged_in(tmp_path, tmp_path / "none")
+    page = c.get("/welcome").get_data(as_text=True)
+    assert "Remember, Mert is watching you." in page and "<img" not in page
+    assert c.get("/greeting-photo").status_code == 404
+
+
+def test_welcome_photo_is_read_from_the_private_folder(tmp_path):
+    from PIL import Image
+
+    private = tmp_path / "private"
+    private.mkdir()
+    Image.new("RGB", (4, 4), "red").save(private / "greeting.png")
+    c = _logged_in(tmp_path, private)
+    assert "<img" in c.get("/welcome").get_data(as_text=True)
+    photo = c.get("/greeting-photo")
+    assert photo.status_code == 200 and photo.mimetype == "image/png"
+
+
+def test_heif_photo_is_converted_to_jpeg(tmp_path):
+    pillow_heif = pytest.importorskip("pillow_heif")
+    from PIL import Image
+
+    pillow_heif.register_heif_opener()
+    private = tmp_path / "private"
+    private.mkdir()
+    Image.new("RGB", (64, 64), "blue").save(private / "greeting.heic", format="HEIF")
+    photo = _logged_in(tmp_path, private).get("/greeting-photo")
+    assert photo.status_code == 200 and photo.mimetype == "image/jpeg"
+    assert photo.data[:2] == b"\xff\xd8"  # JPEG magic bytes
+
+
+def test_private_folder_is_gitignored():
+    import subprocess
+
+    from kinetik_stock.config import REPO_ROOT
+
+    result = subprocess.run(["git", "check-ignore", "private/greeting.heic"], cwd=REPO_ROOT)
+    assert result.returncode == 0

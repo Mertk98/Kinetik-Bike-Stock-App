@@ -5,3 +5,5 @@ __pycache__/
 output/*.csv
 .venv/
 venv/
+output/debug/
+private/

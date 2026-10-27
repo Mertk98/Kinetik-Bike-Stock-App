@@ -62,6 +62,19 @@ defaults to `sales@kinetikcycles.com`); without a password, a random one is
 printed on each start. Use `python gui.py --local-only` to disable phone access. Don't expose
 the port to the internet.
 
+### Welcome photo
+
+After login the GUI shows a welcome page with a greeting message and, if
+present, a photo. The photo is personal, so it is **not** in the repo: put it
+on the PC that runs `gui.py` as `private/greeting.jpg` (or `.png`, `.webp`,
+`.heic`, `.heif`) - the `private/` folder is gitignored. Without a photo the
+page shows just the message. HEIC/HEIF files (iPhone photos) are converted
+for the browser automatically once you run:
+
+```bash
+pip install pillow pillow-heif
+```
+
 Tabs: **Run** (one report per brand - Norco, Devinci etc. each write their own
 file, never combined; "Run all" just runs them one after another; brands still
 in progress show as such and can't be run; live log), **Results** (browse/filter/download anything in `output/`), **SKU

@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import hmac
 import io
+import logging
 import secrets
 import shutil
 from datetime import datetime
@@ -16,13 +17,52 @@ from pathlib import Path
 from flask import (Flask, abort, jsonify, redirect, render_template, request,
                    send_from_directory, session, url_for)
 
+from kinetik_stock.config import REPO_ROOT
 from kinetik_stock.gui import jobs
 from kinetik_stock.gui.jobs import Busy, JobManager
 
 MAX_PREVIEW_ROWS = 5000
 
+# The welcome photo is personal, so it lives in a gitignored folder on the PC
+# running the GUI (never in the repo): private/greeting.<ext>.
+PRIVATE_DIR = REPO_ROOT / "private"
+BROWSER_IMAGES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+HEIF_EXTS = (".heic", ".heif")
 
-def create_app(username: str, password: str, output_dir: Path | None = None) -> Flask:
+
+def load_greeting_photo(private_dir: Path) -> tuple[bytes, str] | None:
+    """Returns (bytes, mimetype) for private/greeting.*, or None if there's no
+    usable photo. Browsers on Windows/Android can't show HEIF, so HEIC/HEIF
+    files are converted to JPEG on the fly (needs `pip install pillow pillow-heif`).
+    """
+    for ext, mimetype in BROWSER_IMAGES.items():
+        path = private_dir / f"greeting{ext}"
+        if path.is_file():
+            return path.read_bytes(), mimetype
+    for ext in HEIF_EXTS:
+        path = private_dir / f"greeting{ext}"
+        if not path.is_file():
+            continue
+        try:
+            import pillow_heif
+            from PIL import Image, ImageOps
+
+            pillow_heif.register_heif_opener()
+            image = ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+            image.thumbnail((900, 1200))
+            buf = io.BytesIO()
+            image.save(buf, "JPEG", quality=85)
+            return buf.getvalue(), "image/jpeg"
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Couldn't read %s - run: pip install pillow pillow-heif", path, exc_info=True
+            )
+    return None
+
+
+def create_app(
+    username: str, password: str, output_dir: Path | None = None, private_dir: Path | None = None
+) -> Flask:
     app = Flask(__name__)
     app.config["SECRET_KEY"] = secrets.token_hex(32)
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -30,6 +70,7 @@ def create_app(username: str, password: str, output_dir: Path | None = None) -> 
     manager = JobManager()
     app.extensions["job_manager"] = manager
     out_dir = output_dir or jobs.OUTPUT_DIR
+    photo_dir = private_dir or PRIVATE_DIR
 
     def login_required(view):
         @wraps(view)
@@ -51,7 +92,7 @@ def create_app(username: str, password: str, output_dir: Path | None = None) -> 
             pass_ok = hmac.compare_digest(request.form.get("password", "").encode(), password.encode())
             if user_ok and pass_ok:
                 session["ok"] = True
-                return redirect(url_for("index"))
+                return redirect(url_for("welcome"))
             error = "Wrong email or password"
         return render_template("login.html", error=error), (401 if error else 200)
 
@@ -59,6 +100,21 @@ def create_app(username: str, password: str, output_dir: Path | None = None) -> 
     def logout():
         session.clear()
         return redirect(url_for("login"))
+
+    @app.get("/welcome")
+    @login_required
+    def welcome():
+        return render_template("welcome.html", has_photo=load_greeting_photo(photo_dir) is not None)
+
+    # Served through a login-protected route (not /static) so the photo isn't
+    # visible to anyone on the network without signing in.
+    @app.get("/greeting-photo")
+    @login_required
+    def greeting_image():
+        photo = load_greeting_photo(photo_dir)
+        if photo is None:
+            abort(404)
+        return app.response_class(photo[0], mimetype=photo[1], headers={"Cache-Control": "private, max-age=3600"})
 
     @app.get("/")
     @login_required
